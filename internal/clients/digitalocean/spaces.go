@@ -202,10 +202,27 @@ func (c *SpacesClient) CreateScopedCredential(ctx context.Context, bucket string
 			"a DigitalOcean token (--token / $%s) is required to mint a scoped Spaces key.", tokenEnv,
 		))
 	}
-	created, _, err := c.doClient.SpacesKeys.Create(ctx, &godo.SpacesKeyCreateRequest{
+	req := &godo.SpacesKeyCreateRequest{
 		Name:   fmt.Sprintf("dctl-%s-%d", bucket, time.Now().Unix()),
 		Grants: []*godo.Grant{{Bucket: bucket, Permission: godo.SpacesKeyReadWrite}},
-	})
+	}
+	// A bucket created moments earlier via the S3 data-plane endpoint can lag
+	// becoming visible to the SpacesKeys control-plane API, which then rejects
+	// the grant ("...buckets are not available and should be removed from the
+	// grant"). Retry through that eventual-consistency window before failing.
+	var created *godo.SpacesKey
+	var err error
+	for attempt := 0; attempt < 6; attempt++ {
+		created, _, err = c.doClient.SpacesKeys.Create(ctx, req)
+		if err == nil || !bucketNotYetVisible(err) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return core.Credential{}, apiError(ctx.Err())
+		case <-time.After(time.Duration(attempt+1) * time.Second):
+		}
+	}
 	if err != nil {
 		return core.Credential{}, apiError(err)
 	}
@@ -323,6 +340,19 @@ func alreadyOwned(err error) bool {
 		case "BucketAlreadyOwnedByYou", "BucketAlreadyExists":
 			return true
 		}
+	}
+	return false
+}
+
+// bucketNotYetVisible reports whether a SpacesKeys grant creation failed only
+// because the just-created bucket is not yet visible to the DO control plane —
+// the eventual-consistency lag between the S3 data plane that created the bucket
+// and the API that validates grants against it. DO surfaces this as a plain
+// message, so match on it rather than an error code.
+func bucketNotYetVisible(err error) bool {
+	var doErr *godo.ErrorResponse
+	if errors.As(err, &doErr) {
+		return strings.Contains(doErr.Message, "not available and should be removed from the grant")
 	}
 	return false
 }
