@@ -333,6 +333,7 @@ func TestValidateTLSIssuer(t *testing.T) {
 	}{
 		{"selfsigned", false},
 		{"letsencrypt", false},
+		{"staging", false},
 		{"", true},
 		{"self-signed", true},
 		{"letsencrypt-staging", true},
@@ -341,6 +342,45 @@ func TestValidateTLSIssuer(t *testing.T) {
 		t.Run(tc.issuer, func(t *testing.T) {
 			if err := ValidateTLSIssuer(tc.issuer); tc.wantErr != (err != nil) {
 				t.Fatalf("ValidateTLSIssuer(%q) err=%v, wantErr=%v", tc.issuer, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestACMEReconcileRoot(t *testing.T) {
+	cases := []struct {
+		issuer   string
+		wantOK   bool
+		wantName string
+		wantPath string
+	}{
+		{TLSIssuerLetsEncrypt, true, LetsEncryptRootName, DefaultLetsEncryptPath},
+		{TLSIssuerStaging, true, StagingRootName, DefaultStagingPath},
+		{TLSIssuerSelfSigned, false, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.issuer, func(t *testing.T) {
+			root, ok := ACMEReconcileRoot(tc.issuer)
+			if ok != tc.wantOK {
+				t.Fatalf("ACMEReconcileRoot(%q) ok=%v, want %v", tc.issuer, ok, tc.wantOK)
+			}
+			if !tc.wantOK {
+				return
+			}
+			if root.Name != tc.wantName || root.Path != tc.wantPath {
+				t.Fatalf("ACMEReconcileRoot(%q) = {Name:%q Path:%q}, want {Name:%q Path:%q}",
+					tc.issuer, root.Name, root.Path, tc.wantName, tc.wantPath)
+			}
+			// The ACME issuer layer needs the ClusterIssuer CRD and the bitwarden
+			// store for its DNS-01 token ExternalSecret.
+			wantDeps := map[string]bool{CertManagerConfigName: true, ESOConfigName: true}
+			if len(root.DependsOn) != len(wantDeps) {
+				t.Fatalf("ACMEReconcileRoot(%q) DependsOn=%v, want %v", tc.issuer, root.DependsOn, wantDeps)
+			}
+			for _, d := range root.DependsOn {
+				if !wantDeps[d] {
+					t.Fatalf("ACMEReconcileRoot(%q) unexpected dependency %q", tc.issuer, d)
+				}
 			}
 		})
 	}

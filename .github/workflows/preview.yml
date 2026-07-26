@@ -82,7 +82,7 @@ jobs:
           bws run --project-id ${{ vars.BWS_PROJECT_ID }} --
           nix run .#default -- digitalocean cluster bootstrap "$CLUSTER_NAME"
           --source-type git --source-revision "$HEAD_REF" --base-domain "$BASE_DOMAIN"
-          --tls-issuer selfsigned
+          --tls-issuer staging
           --bitwarden-token "$BWS_ACCESS_TOKEN"
 
       - name: Deploy echo payload app
@@ -90,6 +90,23 @@ jobs:
           nix run .#default -- flux kustomization create echo
           --source platform --type git --path ./flux/echo
           --substitute --depends-on ingress --kubeconfig .kubeconfig
+
+      # Prove the ACME/DNS-01 → Cloudflare issuance end-to-end: the Traefik
+      # default cert is issued by the `staging` ClusterIssuer, so it only goes
+      # Ready once cert-manager completes the Let's Encrypt staging order and its
+      # Cloudflare DNS-01 challenge. The `verify` gate below also blocks on this
+      # (the ingress root health-checks the Certificate), but that surfaces as a
+      # slow timeout; this fails fast and names the cert when DNS-01 is broken.
+      # Flux creates the Certificate asynchronously, so wait for it to exist
+      # (`kubectl wait` errors on an absent object) before waiting for Ready.
+      - name: Verify TLS certificate issued (ACME/DNS-01)
+        run: |
+          nix develop --command bash -c '
+            kubectl --kubeconfig .kubeconfig wait --for=create \
+              certificate/traefik-default-tls -n traefik --timeout=120s
+            kubectl --kubeconfig .kubeconfig wait --for=condition=Ready \
+              certificate/traefik-default-tls -n traefik --timeout=300s
+          '
 
       # Gate on Kustomization reconciliation
       - name: Verify Kustomizations reconciled

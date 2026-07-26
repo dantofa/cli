@@ -9,7 +9,9 @@
 - [DONE] Add a restore / DR drill: scheduled verification that both backups actually restore (extend the CI Velero probe from backup-only to backup+restore)
 - Deploy the Grafana Stack (metrics, logging, alerting) — the observability backend the deferred control-loop / SLO / accuracy-alert items in ROADMAP.md depend on
 - [DONE] Add cost monitoring + budget alerts for DigitalOcean spend (clusters, LoadBalancers, Spaces); flag orphaned/leftover resources (e.g. preview clusters)
-- Validate the Let's Encrypt production TLS path (`--tls-issuer letsencrypt` + Cloudflare DNS-01) against a real DOKS cluster — built but never run
+- [DONE] Validate the Let's Encrypt TLS path (`--tls-issuer letsencrypt` + Cloudflare DNS-01) against a real DOKS cluster — built but never run
+  - [DONE] Add a staging issuer variant: `--tls-issuer staging` (Let's Encrypt staging ACME server, same Cloudflare DNS-01 solver, deployed from `flux/ingress/letsencrypt-staging`) so preview and prod select the CA per cluster; production LE stays on prod only, and its rate limits stay off the preview path.
+  - [DONE] Exercise it continuously in preview: `preview.yml` now bootstraps with `--tls-issuer staging` instead of `selfsigned`, so every PR proves the ACME/DNS-01 → Cloudflare flow end-to-end. Staging's high rate limits suit ephemeral per-PR clusters and its untrusted origin certs are fine (Cloudflare Full terminates edge TLS with its own trusted cert).
 - CI capacity: provision larger / self-hosted runners and re-enable the `local` workflow (currently `workflow_dispatch`-only due to capacity) — also unblocks the restore drill
 
 ## Downstream projects

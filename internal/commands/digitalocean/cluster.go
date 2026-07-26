@@ -381,17 +381,12 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 					Substitute: true,
 				},
 			}
-			// The letsencrypt ACME issuer (+ its Cloudflare DNS-01 token) is only
-			// needed when the Traefik cert is issued by it. It needs the
-			// ClusterIssuer CRD (cert-manager) and the bitwarden store for the
-			// token ExternalSecret (eso-config); the Traefik Certificate resolves
-			// against it asynchronously once it is Ready.
-			if tlsIssuer == fluxcore.TLSIssuerLetsEncrypt {
-				roots = append(roots, fluxcore.ReconcileRoot{
-					Name:      fluxcore.LetsEncryptRootName,
-					Path:      fluxcore.DefaultLetsEncryptPath,
-					DependsOn: []string{fluxcore.CertManagerConfigName, fluxcore.ESOConfigName},
-				})
+			// An ACME issuer layer (letsencrypt production or the letsencrypt
+			// staging CA, + its Cloudflare DNS-01 token) is added only when the
+			// Traefik cert is issued by one; selfsigned needs none. Core owns the
+			// issuer → path/name mapping and its cert-manager/eso dependencies.
+			if root, ok := fluxcore.ACMEReconcileRoot(tlsIssuer); ok {
+				roots = append(roots, root)
 			}
 			res, err := fluxcore.Bootstrap(ctx, fluxclient.New(kubePath), kc, fluxVersion,
 				fluxcore.SourceSpec{Type: st, Name: src, URL: sourceURL, Revision: sourceRevision},
@@ -422,7 +417,7 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 	f.StringVar(&baseDomain, "base-domain", "", "Cluster ingress FQDN (${base_domain} in cluster-vars). Required.")
 	_ = cmd.MarkFlagRequired("base-domain")
 	f.StringVar(&tlsIssuer, "tls-issuer", fluxcore.TLSIssuerSelfSigned,
-		`cert-manager ClusterIssuer for the Traefik default cert: "selfsigned" (Cloudflare Full) or "letsencrypt" (Full strict, DNS-01).`)
+		`cert-manager ClusterIssuer for the Traefik default cert: "selfsigned" (Cloudflare Full), "letsencrypt" (Full strict, DNS-01), or "staging" (Let's Encrypt staging CA, DNS-01).`)
 	f.StringVar(&bwToken, "bitwarden-token", "", "Bitwarden machine-account token for the ESO secret-zero (default $BWS_ACCESS_TOKEN).")
 	f.StringVar(&bwProjectID, "bitwarden-project-id", "", "Bitwarden project ID for the ClusterSecretStore (default $BWS_PROJECT_ID).")
 	f.StringVar(&bwOrgID, "bitwarden-org-id", "", "Bitwarden organization ID for the ClusterSecretStore (default $BWS_ORGANIZATION_ID).")

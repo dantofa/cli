@@ -62,10 +62,15 @@ const (
 	DefaultExternalDNSPath = "./flux/ingress/external-dns"
 	// LetsEncryptRootName / DefaultLetsEncryptPath is the ACME (Let's Encrypt)
 	// issuer layer: the letsencrypt ClusterIssuer + its Cloudflare DNS-01 token.
-	// DOKS-only and deployed only when --tls-issuer=letsencrypt (production);
-	// preview clusters use the always-present selfsigned issuer instead.
+	// DOKS-only and deployed only when --tls-issuer=letsencrypt (production).
+	// StagingRootName / DefaultStagingPath is the same layer against Let's
+	// Encrypt's staging CA (--tls-issuer=staging), for preview/CI clusters —
+	// same DNS-01 flow, high rate limits, untrusted certs. Both are DOKS-only;
+	// selfsigned clusters use the always-present selfsigned issuer instead.
 	LetsEncryptRootName    = "letsencrypt"
 	DefaultLetsEncryptPath = "./flux/ingress/letsencrypt"
+	StagingRootName        = "letsencrypt-staging"
+	DefaultStagingPath     = "./flux/ingress/letsencrypt-staging"
 	// EchoRootName / DefaultEchoPath deploy the echo test backend. kind clusters
 	// get it by default (after the ingress layer, so it is routable); it is
 	// reusable on any cluster type via ./flux/echo.
@@ -96,7 +101,8 @@ const (
 	VarBitwardenOrgID     = "bitwarden_org_id"
 	VarBitwardenProjectID = "bitwarden_project_id"
 	// VarTLSIssuer is the cert-manager ClusterIssuer name the DOKS Traefik default
-	// certificate is issued by: TLSIssuerSelfSigned or TLSIssuerLetsEncrypt.
+	// certificate is issued by: TLSIssuerSelfSigned, TLSIssuerLetsEncrypt, or
+	// TLSIssuerStaging.
 	VarTLSIssuer = "tls_issuer"
 	// VarDNSZone is the cluster's Cloudflare zone apex (eTLD+1 of base_domain),
 	// e.g. dantofa.dev. external-dns filters zones by their apex, so it must be
@@ -196,11 +202,15 @@ type SecretApplier interface {
 
 // TLS issuer names — the cert-manager ClusterIssuer the Traefik default cert is
 // issued by, selected per cluster at bootstrap (--tls-issuer). SelfSigned pairs
-// with Cloudflare Full (preview: no rate limits, no external dep); LetsEncrypt
-// pairs with Full (strict) (production: a publicly-trusted cert via DNS-01).
+// with Cloudflare Full (no rate limits, no external dep); LetsEncrypt pairs with
+// Full (strict) (production: a publicly-trusted cert via DNS-01); Staging is the
+// same ACME/DNS-01 flow against Let's Encrypt's staging CA (preview/CI: high
+// rate limits, untrusted certs — exercises the ACME path without spending the
+// production CA's limits on ephemeral per-PR clusters).
 const (
 	TLSIssuerSelfSigned  = "selfsigned"
 	TLSIssuerLetsEncrypt = "letsencrypt"
+	TLSIssuerStaging     = "staging"
 )
 
 // DNSZone returns the registrable domain (eTLD+1) of an ingress base_domain,
@@ -218,16 +228,37 @@ func DNSZone(baseDomain string) (string, error) {
 
 // ValidateTLSIssuer rejects an unknown --tls-issuer value. The name is also the
 // ClusterIssuer name substituted into the Traefik Certificate, so it must match
-// an issuer the cluster deploys (selfsigned is always present; letsencrypt is
-// added only for that value).
+// an issuer the cluster deploys (selfsigned is always present; letsencrypt and
+// staging are each added only for their value, via ACMEReconcileRoot).
 func ValidateTLSIssuer(issuer string) error {
 	switch issuer {
-	case TLSIssuerSelfSigned, TLSIssuerLetsEncrypt:
+	case TLSIssuerSelfSigned, TLSIssuerLetsEncrypt, TLSIssuerStaging:
 		return nil
 	default:
-		return fmt.Errorf("--tls-issuer must be %q or %q, got %q",
-			TLSIssuerSelfSigned, TLSIssuerLetsEncrypt, issuer)
+		return fmt.Errorf("--tls-issuer must be %q, %q, or %q, got %q",
+			TLSIssuerSelfSigned, TLSIssuerLetsEncrypt, TLSIssuerStaging, issuer)
 	}
+}
+
+// ACMEReconcileRoot returns the reconcile root that deploys the ACME
+// ClusterIssuer for an ACME-backed --tls-issuer (letsencrypt → production CA,
+// staging → Let's Encrypt staging CA), and ok=false for selfsigned (no ACME
+// layer; the selfsigned issuer ships in cert-manager-config). The root needs
+// the ClusterIssuer CRD (cert-manager-config) and the bitwarden store for the
+// Cloudflare DNS-01 token ExternalSecret (eso-config); the Traefik Certificate
+// resolves against the issuer asynchronously once it is Ready. Callers must
+// have passed ValidateTLSIssuer first, so an unknown value cannot reach here.
+func ACMEReconcileRoot(issuer string) (ReconcileRoot, bool) {
+	root := ReconcileRoot{DependsOn: []string{CertManagerConfigName, ESOConfigName}}
+	switch issuer {
+	case TLSIssuerLetsEncrypt:
+		root.Name, root.Path = LetsEncryptRootName, DefaultLetsEncryptPath
+	case TLSIssuerStaging:
+		root.Name, root.Path = StagingRootName, DefaultStagingPath
+	default:
+		return ReconcileRoot{}, false
+	}
+	return root, true
 }
 
 // ValidateBitwardenConfig guards against a half-configured Bitwarden setup. When
