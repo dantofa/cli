@@ -370,6 +370,16 @@ capture-diagnostics:
   kubectl get externalsecrets,clustersecretstores,clusterissuers,certificates \
     -A -o wide >"$out/secrets-resources.txt" 2>&1 || true
   kubectl describe externalsecrets,clustersecretstores -A >"$out/secrets-describe.txt" 2>&1 || true
+  # cert-manager issuance chain: ClusterIssuer readiness, and the ACME
+  # Certificate -> CertificateRequest -> Order -> Challenge chain that stalls
+  # when DNS-01 (or the solver token secret) is not right. Plus the controller
+  # log (a Running pod, so not covered by the not-settled loop below).
+  kubectl get certificaterequests,orders,challenges -A -o wide \
+    >"$out/cert-manager-chain.txt" 2>&1 || true
+  kubectl describe clusterissuers,certificates,certificaterequests,orders,challenges -A \
+    >"$out/cert-manager-describe.txt" 2>&1 || true
+  kubectl -n cert-manager logs deploy/cert-manager --tail=400 \
+    >"$out/logs_cert-manager.txt" 2>&1 || true
   # Workloads, scheduling, events.
   kubectl get pods -A -o wide >"$out/pods.txt" 2>&1 || true
   kubectl get nodes -o wide >"$out/nodes.txt" 2>&1 || true
