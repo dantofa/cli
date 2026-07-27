@@ -61,16 +61,15 @@ const (
 	ExternalDNSRootName    = "external-dns"
 	DefaultExternalDNSPath = "./flux/ingress/external-dns"
 	// LetsEncryptRootName / DefaultLetsEncryptPath is the ACME (Let's Encrypt)
-	// issuer layer: the letsencrypt ClusterIssuer + its Cloudflare DNS-01 token.
-	// DOKS-only and deployed only when --tls-issuer=letsencrypt (production).
-	// StagingRootName / DefaultStagingPath is the same layer against Let's
-	// Encrypt's staging CA (--tls-issuer=staging), for preview/CI clusters —
-	// same DNS-01 flow, high rate limits, untrusted certs. Both are DOKS-only;
-	// selfsigned clusters use the always-present selfsigned issuer instead.
+	// issuer layer: one letsencrypt ClusterIssuer + its Cloudflare DNS-01 token,
+	// shared by both ACME --tls-issuer values (letsencrypt production, staging
+	// CA). The issuer name and ACME endpoint are substituted per cluster from
+	// cluster-vars (${tls_issuer}, ${acme_server}), so the same manifests serve
+	// prod and preview. DOKS-only and deployed only for an ACME issuer; selfsigned
+	// clusters use the always-present selfsigned issuer instead. The Flux
+	// Kustomization is named "letsencrypt" on every cluster regardless of CA.
 	LetsEncryptRootName    = "letsencrypt"
 	DefaultLetsEncryptPath = "./flux/ingress/letsencrypt"
-	StagingRootName        = "letsencrypt-staging"
-	DefaultStagingPath     = "./flux/ingress/letsencrypt-staging"
 	// EchoRootName / DefaultEchoPath deploy the echo test backend. kind clusters
 	// get it by default (after the ingress layer, so it is routable); it is
 	// reusable on any cluster type via ./flux/echo.
@@ -102,8 +101,14 @@ const (
 	VarBitwardenProjectID = "bitwarden_project_id"
 	// VarTLSIssuer is the cert-manager ClusterIssuer name the DOKS Traefik default
 	// certificate is issued by: TLSIssuerSelfSigned, TLSIssuerLetsEncrypt, or
-	// TLSIssuerStaging.
+	// TLSIssuerStaging. It also names the shared ACME ClusterIssuer and its
+	// account-key secret (${tls_issuer}-account-key) in the letsencrypt layer.
 	VarTLSIssuer = "tls_issuer"
+	// VarACMEServer is the ACME directory endpoint the shared letsencrypt
+	// ClusterIssuer registers against (${acme_server}) — the production or staging
+	// Let's Encrypt CA, per ACMEServerURL(tls_issuer). Empty for selfsigned (the
+	// ACME layer is not deployed), so nothing references it.
+	VarACMEServer = "acme_server"
 	// VarDNSZone is the cluster's Cloudflare zone apex (eTLD+1 of base_domain),
 	// e.g. dantofa.dev. external-dns filters zones by their apex, so it must be
 	// the registrable domain, not base_domain (a subdomain would exclude the zone).
@@ -213,6 +218,30 @@ const (
 	TLSIssuerStaging     = "staging"
 )
 
+// ACME directory endpoints the shared letsencrypt ClusterIssuer registers
+// against, selected by --tls-issuer (see ACMEServerURL). Production issues
+// publicly-trusted certs under tight rate limits; staging is untrusted with high
+// limits, for ephemeral preview/CI clusters.
+const (
+	ACMEServerLetsEncrypt = "https://acme-v02.api.letsencrypt.org/directory"
+	ACMEServerStaging     = "https://acme-staging-v02.api.letsencrypt.org/directory"
+)
+
+// ACMEServerURL maps an ACME-backed --tls-issuer to its ACME directory endpoint,
+// injected as the ${acme_server} cluster-var and substituted into the shared
+// ClusterIssuer. Returns "" for a non-ACME issuer (selfsigned), which deploys no
+// ACME layer, so the empty value is never referenced.
+func ACMEServerURL(issuer string) string {
+	switch issuer {
+	case TLSIssuerLetsEncrypt:
+		return ACMEServerLetsEncrypt
+	case TLSIssuerStaging:
+		return ACMEServerStaging
+	default:
+		return ""
+	}
+}
+
 // DNSZone returns the registrable domain (eTLD+1) of an ingress base_domain,
 // e.g. "preview.dantofa.dev" -> "dantofa.dev", "dantofa.com" -> "dantofa.com".
 // This is the cluster's Cloudflare zone apex: external-dns filters zones by apex
@@ -241,24 +270,28 @@ func ValidateTLSIssuer(issuer string) error {
 }
 
 // ACMEReconcileRoot returns the reconcile root that deploys the ACME
-// ClusterIssuer for an ACME-backed --tls-issuer (letsencrypt → production CA,
-// staging → Let's Encrypt staging CA), and ok=false for selfsigned (no ACME
-// layer; the selfsigned issuer ships in cert-manager-config). The root needs
-// the ClusterIssuer CRD (cert-manager-config) and the bitwarden store for the
-// Cloudflare DNS-01 token ExternalSecret (eso-config); the Traefik Certificate
-// resolves against the issuer asynchronously once it is Ready. Callers must
-// have passed ValidateTLSIssuer first, so an unknown value cannot reach here.
+// ClusterIssuer for an ACME-backed --tls-issuer (letsencrypt or staging), and
+// ok=false for selfsigned (no ACME layer; the selfsigned issuer ships in
+// cert-manager-config). Both ACME issuers share one root — same name
+// ("letsencrypt") and path on every cluster — with the issuer identity carried
+// by substitution (${tls_issuer}, ${acme_server}), so Substitute is set. The
+// root needs the ClusterIssuer CRD (cert-manager-config) and the bitwarden store
+// for the Cloudflare DNS-01 token ExternalSecret (eso-config); the Traefik
+// Certificate resolves against the issuer asynchronously once it is Ready.
+// Callers must have passed ValidateTLSIssuer first, so an unknown value cannot
+// reach here.
 func ACMEReconcileRoot(issuer string) (ReconcileRoot, bool) {
-	root := ReconcileRoot{DependsOn: []string{CertManagerConfigName, ESOConfigName}}
 	switch issuer {
-	case TLSIssuerLetsEncrypt:
-		root.Name, root.Path = LetsEncryptRootName, DefaultLetsEncryptPath
-	case TLSIssuerStaging:
-		root.Name, root.Path = StagingRootName, DefaultStagingPath
+	case TLSIssuerLetsEncrypt, TLSIssuerStaging:
+		return ReconcileRoot{
+			Name:       LetsEncryptRootName,
+			Path:       DefaultLetsEncryptPath,
+			DependsOn:  []string{CertManagerConfigName, ESOConfigName},
+			Substitute: true,
+		}, true
 	default:
 		return ReconcileRoot{}, false
 	}
-	return root, true
 }
 
 // ValidateBitwardenConfig guards against a half-configured Bitwarden setup. When

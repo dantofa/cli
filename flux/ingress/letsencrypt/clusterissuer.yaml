@@ -1,22 +1,26 @@
 ---
-# ACME (Let's Encrypt) ClusterIssuer for production DOKS clusters. cert-manager
-# obtains a publicly-trusted certificate via a DNS-01 challenge solved through
-# Cloudflare, so Cloudflare Full (strict) validates the origin. Wildcards need
-# DNS-01, and the challenge never touches ingress (the origin is only reachable
-# through Cloudflare's proxy). No account email is set: cert-manager auto-renews,
-# so expiry notices are unnecessary. Deployed only when the cluster is
-# bootstrapped with --tls-issuer letsencrypt; preview clusters use the selfsigned
-# issuer + Cloudflare Full, avoiding Let's Encrypt rate limits on ephemeral
-# per-PR clusters.
+# ACME (Let's Encrypt) ClusterIssuer, shared by both ACME --tls-issuer values:
+# letsencrypt (production CA) and staging (Let's Encrypt staging CA). One
+# manifest — the issuer name, ACME endpoint, and account-key secret are
+# substituted per cluster from cluster-vars (${tls_issuer}, ${acme_server}), so
+# prod and preview reuse it. cert-manager obtains the cert via a DNS-01 challenge
+# solved through Cloudflare (wildcards need DNS-01, and the challenge never
+# touches ingress — the origin is only reachable through Cloudflare's proxy).
+# Production is publicly trusted (Cloudflare Full strict); staging is untrusted
+# with high rate limits, for ephemeral preview/CI clusters. A per-issuer account
+# key (${tls_issuer}-account-key) keeps the prod and staging ACME accounts
+# separate. No account email is set: cert-manager auto-renews, so expiry notices
+# are unnecessary. Deployed only for an ACME --tls-issuer; selfsigned clusters
+# use the always-present selfsigned issuer + Cloudflare Full instead.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
-  name: letsencrypt
+  name: ${tls_issuer}
 spec:
   acme:
-    server: https://acme-v02.api.letsencrypt.org/directory
+    server: ${acme_server}
     privateKeySecretRef:
-      name: letsencrypt-account-key
+      name: ${tls_issuer}-account-key
     solvers:
       - dns01:
           cloudflare:

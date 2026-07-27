@@ -358,6 +358,7 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 				fluxcore.VarBitwardenOrgID:     bwOrgID,
 				fluxcore.VarBitwardenProjectID: bwProjectID,
 				fluxcore.VarTLSIssuer:          tlsIssuer,
+				fluxcore.VarACMEServer:         fluxcore.ACMEServerURL(tlsIssuer),
 				fluxcore.VarDNSZone:            dnsZone,
 			}
 			// Traefik (ingress) and external-dns (DNS) are separate stacks.

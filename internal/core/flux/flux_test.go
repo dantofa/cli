@@ -349,14 +349,12 @@ func TestValidateTLSIssuer(t *testing.T) {
 
 func TestACMEReconcileRoot(t *testing.T) {
 	cases := []struct {
-		issuer   string
-		wantOK   bool
-		wantName string
-		wantPath string
+		issuer string
+		wantOK bool
 	}{
-		{TLSIssuerLetsEncrypt, true, LetsEncryptRootName, DefaultLetsEncryptPath},
-		{TLSIssuerStaging, true, StagingRootName, DefaultStagingPath},
-		{TLSIssuerSelfSigned, false, "", ""},
+		{TLSIssuerLetsEncrypt, true},
+		{TLSIssuerStaging, true},
+		{TLSIssuerSelfSigned, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.issuer, func(t *testing.T) {
@@ -367,9 +365,15 @@ func TestACMEReconcileRoot(t *testing.T) {
 			if !tc.wantOK {
 				return
 			}
-			if root.Name != tc.wantName || root.Path != tc.wantPath {
+			// Both ACME issuers share the single "letsencrypt" root (name + path),
+			// distinguished only by the substituted ${tls_issuer}/${acme_server}.
+			if root.Name != LetsEncryptRootName || root.Path != DefaultLetsEncryptPath {
 				t.Fatalf("ACMEReconcileRoot(%q) = {Name:%q Path:%q}, want {Name:%q Path:%q}",
-					tc.issuer, root.Name, root.Path, tc.wantName, tc.wantPath)
+					tc.issuer, root.Name, root.Path, LetsEncryptRootName, DefaultLetsEncryptPath)
+			}
+			// Substitution must be on so ${tls_issuer}/${acme_server} resolve.
+			if !root.Substitute {
+				t.Fatalf("ACMEReconcileRoot(%q) Substitute=false, want true", tc.issuer)
 			}
 			// The ACME issuer layer needs the ClusterIssuer CRD and the bitwarden
 			// store for its DNS-01 token ExternalSecret.
@@ -381,6 +385,24 @@ func TestACMEReconcileRoot(t *testing.T) {
 				if !wantDeps[d] {
 					t.Fatalf("ACMEReconcileRoot(%q) unexpected dependency %q", tc.issuer, d)
 				}
+			}
+		})
+	}
+}
+
+func TestACMEServerURL(t *testing.T) {
+	cases := []struct {
+		issuer string
+		want   string
+	}{
+		{TLSIssuerLetsEncrypt, ACMEServerLetsEncrypt},
+		{TLSIssuerStaging, ACMEServerStaging},
+		{TLSIssuerSelfSigned, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.issuer, func(t *testing.T) {
+			if got := ACMEServerURL(tc.issuer); got != tc.want {
+				t.Fatalf("ACMEServerURL(%q) = %q, want %q", tc.issuer, got, tc.want)
 			}
 		})
 	}
