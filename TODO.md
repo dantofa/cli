@@ -3,12 +3,11 @@
 ## Wave 0: Production-readiness foundation
 
 - [DONE] Cluster update verification: gate PRs on the _upgrade_ path, not just fresh convergence.
-- Configure cluster backups (build on the CNPG + Velero operators already deployed)
+- [DONE] Configure cluster backups (Velero cluster-object backup + restore drill). Database backups are out of platform scope: the platform ships no database, so the CloudNativePG operator was dropped (no consumer — Zitadel is not implemented here). A downstream project that owns a database owns its own DB backup capability.
   - [DONE] Velero daily cluster-object backup to DigitalOcean Spaces bucket
-  - CloudNativePG WAL archiving + daily base backups to DigitalOcean Spaces bucket
 - [DONE] Add a restore / DR drill: scheduled verification that both backups actually restore (extend the CI Velero probe from backup-only to backup+restore)
-- Deploy the Grafana Stack (metrics, logging, alerting) — the observability backend the deferred control-loop / SLO / accuracy-alert items in ROADMAP.md depend on
-- [DONE] Add cost monitoring + budget alerts for DigitalOcean spend (clusters, LoadBalancers, Spaces); flag orphaned/leftover resources (e.g. preview clusters)
+- Deploy Grafana Stack (metrics, logging, alerting) — the observability backend the deferred control-loop / SLO / accuracy-alert items in ROADMAP.md depend on
+- [DONE] Add cost monitoring + budget alerts for DigitalOcean spend (clusters, LoadBalancers, Spaces); flag orphaned/leftover resources
 - [DONE] Validate the Let's Encrypt TLS path (`--tls-issuer letsencrypt` + Cloudflare DNS-01) against a real DOKS cluster — built but never run
   - [DONE] Add a staging issuer variant: `--tls-issuer staging` (Let's Encrypt staging ACME server, same Cloudflare DNS-01 solver) so preview and prod select the CA per cluster; production LE stays on prod only, and its rate limits stay off the preview path. Both ACME issuers share one reusable `flux/ingress/letsencrypt` layer (single `letsencrypt` reconcile root), with the issuer name + ACME endpoint substituted per cluster via `${tls_issuer}`/`${acme_server}` cluster-vars.
   - [DONE] Exercise it continuously in preview: `preview.yml` now bootstraps with `--tls-issuer staging` instead of `selfsigned`, so every PR proves the ACME/DNS-01 → Cloudflare flow end-to-end. Staging's high rate limits suit ephemeral per-PR clusters and its untrusted origin certs are fine (Cloudflare Full terminates edge TLS with its own trusted cert).
@@ -29,8 +28,6 @@
 ## Platform
 
 - [DONE] Add Trivy deployment manifests
-- [DONE] Add CloudNativePG deployment manifests (Zitadel requirement)
-- Add Zitadel deployment manifests (optional)
 - Create reusable justfile template for common operations in downstream projects (e.g. local/preview/prod clusters)
 - Create reusable github actions for common workflows in downstream projects
 - Add image security gates

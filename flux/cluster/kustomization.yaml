@@ -15,4 +15,3 @@ resources:
   - velero.yaml
   - kyverno.yaml
   - trivy.yaml
-  - cloudnativepg.yaml

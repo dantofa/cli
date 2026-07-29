@@ -40,10 +40,10 @@ spec:
     # backs up volume DATA via file-system backup into the same Spaces bucket --
     # self-contained, portable DR that protects any volume a downstream cluster
     # provisions, and reuses the node-agent a later CSI snapshot-data-movement
-    # upgrade would build on. Operator-owned volumes (e.g. CloudNativePG) must opt
-    # OUT of fsBackup via a `backup.velero.io/backup-volumes-excludes` pod
-    # annotation (or `velero.io/exclude-from-backup` on the PVC), set in the
-    # operator's CR -- they own their own volume backups.
+    # upgrade would build on. Any future operator that manages its own volume
+    # backups must opt its volumes OUT of fsBackup via a
+    # `backup.velero.io/backup-volumes-excludes` pod annotation (or
+    # `velero.io/exclude-from-backup` on the PVC), set in the operator's CR.
     snapshotsEnabled: false
     deployNodeAgent: true
     nodeAgent:
