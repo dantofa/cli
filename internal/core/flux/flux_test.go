@@ -333,6 +333,7 @@ func TestValidateTLSIssuer(t *testing.T) {
 	}{
 		{"selfsigned", false},
 		{"letsencrypt", false},
+		{"staging", false},
 		{"", true},
 		{"self-signed", true},
 		{"letsencrypt-staging", true},
@@ -341,6 +342,67 @@ func TestValidateTLSIssuer(t *testing.T) {
 		t.Run(tc.issuer, func(t *testing.T) {
 			if err := ValidateTLSIssuer(tc.issuer); tc.wantErr != (err != nil) {
 				t.Fatalf("ValidateTLSIssuer(%q) err=%v, wantErr=%v", tc.issuer, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestACMEReconcileRoot(t *testing.T) {
+	cases := []struct {
+		issuer string
+		wantOK bool
+	}{
+		{TLSIssuerLetsEncrypt, true},
+		{TLSIssuerStaging, true},
+		{TLSIssuerSelfSigned, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.issuer, func(t *testing.T) {
+			root, ok := ACMEReconcileRoot(tc.issuer)
+			if ok != tc.wantOK {
+				t.Fatalf("ACMEReconcileRoot(%q) ok=%v, want %v", tc.issuer, ok, tc.wantOK)
+			}
+			if !tc.wantOK {
+				return
+			}
+			// Both ACME issuers share the single "letsencrypt" root (name + path),
+			// distinguished only by the substituted ${tls_issuer}/${acme_server}.
+			if root.Name != LetsEncryptRootName || root.Path != DefaultLetsEncryptPath {
+				t.Fatalf("ACMEReconcileRoot(%q) = {Name:%q Path:%q}, want {Name:%q Path:%q}",
+					tc.issuer, root.Name, root.Path, LetsEncryptRootName, DefaultLetsEncryptPath)
+			}
+			// Substitution must be on so ${tls_issuer}/${acme_server} resolve.
+			if !root.Substitute {
+				t.Fatalf("ACMEReconcileRoot(%q) Substitute=false, want true", tc.issuer)
+			}
+			// The ACME issuer layer needs the ClusterIssuer CRD and the bitwarden
+			// store for its DNS-01 token ExternalSecret.
+			wantDeps := map[string]bool{CertManagerConfigName: true, ESOConfigName: true}
+			if len(root.DependsOn) != len(wantDeps) {
+				t.Fatalf("ACMEReconcileRoot(%q) DependsOn=%v, want %v", tc.issuer, root.DependsOn, wantDeps)
+			}
+			for _, d := range root.DependsOn {
+				if !wantDeps[d] {
+					t.Fatalf("ACMEReconcileRoot(%q) unexpected dependency %q", tc.issuer, d)
+				}
+			}
+		})
+	}
+}
+
+func TestACMEServerURL(t *testing.T) {
+	cases := []struct {
+		issuer string
+		want   string
+	}{
+		{TLSIssuerLetsEncrypt, ACMEServerLetsEncrypt},
+		{TLSIssuerStaging, ACMEServerStaging},
+		{TLSIssuerSelfSigned, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.issuer, func(t *testing.T) {
+			if got := ACMEServerURL(tc.issuer); got != tc.want {
+				t.Fatalf("ACMEServerURL(%q) = %q, want %q", tc.issuer, got, tc.want)
 			}
 		})
 	}
