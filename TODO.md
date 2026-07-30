@@ -9,9 +9,9 @@
 - Deploy Grafana Stack (metrics, logging, alerting) — the observability backend the deferred control-loop / SLO / accuracy-alert items in ROADMAP.md depend on
 - [DONE] Add cost monitoring + budget alerts for DigitalOcean spend (clusters, LoadBalancers, Spaces); flag orphaned/leftover resources
 - [DONE] Validate the Let's Encrypt TLS path (`--tls-issuer letsencrypt` + Cloudflare DNS-01) against a real DOKS cluster — built but never run
-  - [DONE] Add a staging issuer variant: `--tls-issuer staging` (Let's Encrypt staging ACME server, same Cloudflare DNS-01 solver) so preview and prod select the CA per cluster; production LE stays on prod only, and its rate limits stay off the preview path. Both ACME issuers share one reusable `flux/ingress/letsencrypt` layer (single `letsencrypt` reconcile root), with the issuer name + ACME endpoint substituted per cluster via `${tls_issuer}`/`${acme_server}` cluster-vars.
+  - [DONE] Add a staging issuer variant: `--tls-issuer staging` (Let's Encrypt staging ACME server, same Cloudflare DNS-01 solver) so preview and prod select the CA per cluster; production LE stays on prod only, and its rate limits stay off the preview path. Both ACME issuers share one reusable layer, split into two ordered reconcile roots — `cloudflare-api-token` (the Cloudflare DNS-01 token ExternalSecret) then `letsencrypt` (the ClusterIssuer, `dependsOn` the token so it never races an absent secret) — with the issuer name + ACME endpoint substituted per cluster via `${tls_issuer}`/`${acme_server}` cluster-vars.
   - [DONE] Exercise it continuously in preview: `preview.yml` now bootstraps with `--tls-issuer staging` instead of `selfsigned`, so every PR proves the ACME/DNS-01 → Cloudflare flow end-to-end. Staging's high rate limits suit ephemeral per-PR clusters and its untrusted origin certs are fine (Cloudflare Full terminates edge TLS with its own trusted cert).
-- CI capacity: provision larger / self-hosted runners and re-enable the `local` workflow (currently `workflow_dispatch`-only due to capacity) — also unblocks the restore drill
+- [DEFERRED] CI capacity: provision larger / self-hosted runners and re-enable the `local` workflow (currently `workflow_dispatch`-only due to capacity) — also unblocks the restore drill
 
 ## Downstream projects
 
@@ -31,14 +31,4 @@
 - Create reusable justfile template for common operations in downstream projects (e.g. local/preview/prod clusters)
 - Create reusable github actions for common workflows in downstream projects
 - Add image security gates
-- Add support for GKE/EKS clusters
-
-## Tooling
-
-- Adopt [Kyverno Chainsaw](https://kyverno.github.io/chainsaw/)
-  to express the `local`/`preview` integration flows as declarative assertion
-  tests (bootstrap -> SeaweedFS/Velero up -> BackupStorageLocation Available ->
-  backup Completed), replacing the `just verify-backup` shell + `kubectl wait`
-  glue. Chainsaw is a CI test runner (not shipped in `dctl`); wire it into the
-  `local.yml`/`preview.yml` workflows. Complements the shipped
-  `dctl flux kustomization verify` gate, which stays kstatus-based.
+- [DEFERRED] Add support for GKE/EKS clusters

@@ -12,6 +12,13 @@
 # separate. No account email is set: cert-manager auto-renews, so expiry notices
 # are unnecessary. Deployed only for an ACME --tls-issuer; selfsigned clusters
 # use the always-present selfsigned issuer + Cloudflare Full instead.
+#
+# Split from the cloudflare-api-token Flux Kustomization that materializes this
+# solver's DNS-01 token ExternalSecret: cert-manager evaluates the issuer's
+# solver the moment it is applied and marks it InvalidSolver — without
+# re-reconciling — if the token Secret is not yet present. Gating the issuer
+# behind cloudflare-api-token (dependsOn + wait) guarantees the secret has synced
+# before the issuer exists, closing that race.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:

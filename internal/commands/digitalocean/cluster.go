@@ -383,17 +383,19 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 				},
 			}
 			// An ACME issuer layer (letsencrypt production or the letsencrypt
-			// staging CA, + its Cloudflare DNS-01 token) is added only when the
-			// Traefik cert is issued by one; selfsigned needs none (it ships in
-			// cert-manager-config). Core owns the issuer → path/name mapping and
-			// its cert-manager/eso dependencies. The ingress layer must also wait
-			// on it: the Traefik Certificate names the ${tls_issuer} ClusterIssuer,
-			// so that issuer must exist before the Certificate is applied — else
-			// the CertificateRequest fails IssuerNotFound and issuance stalls (the
-			// ACME issuer lives in its own root, unlike the selfsigned one).
-			if acme, ok := fluxcore.ACMEReconcileRoot(tlsIssuer); ok {
-				ingress.DependsOn = append(ingress.DependsOn, acme.Name)
-				roots = append(roots, acme)
+			// staging CA) is added only when the Traefik cert is issued by one;
+			// selfsigned needs none (it ships in cert-manager-config). Core owns
+			// the issuer → path/name mapping and its dependencies, returning two
+			// ordered roots: the Cloudflare DNS-01 token ExternalSecret
+			// (cloudflare-api-token), then the letsencrypt ClusterIssuer that
+			// dependsOn it. The ingress layer must also wait on the issuer: the
+			// Traefik Certificate names the ${tls_issuer} ClusterIssuer, so that
+			// issuer must exist before the Certificate is applied — else the
+			// CertificateRequest fails IssuerNotFound and issuance stalls (the ACME
+			// issuer lives in its own root, unlike the selfsigned one).
+			if acme, ok := fluxcore.ACMEReconcileRoots(tlsIssuer); ok {
+				ingress.DependsOn = append(ingress.DependsOn, fluxcore.LetsEncryptRootName)
+				roots = append(roots, acme...)
 			}
 			roots = append(roots, ingress)
 			res, err := fluxcore.Bootstrap(ctx, fluxclient.New(kubePath), kc, fluxVersion,

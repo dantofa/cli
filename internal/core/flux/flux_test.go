@@ -347,46 +347,68 @@ func TestValidateTLSIssuer(t *testing.T) {
 	}
 }
 
-func TestACMEReconcileRoot(t *testing.T) {
-	cases := []struct {
-		issuer string
-		wantOK bool
-	}{
-		{TLSIssuerLetsEncrypt, true},
-		{TLSIssuerStaging, true},
-		{TLSIssuerSelfSigned, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.issuer, func(t *testing.T) {
-			root, ok := ACMEReconcileRoot(tc.issuer)
-			if ok != tc.wantOK {
-				t.Fatalf("ACMEReconcileRoot(%q) ok=%v, want %v", tc.issuer, ok, tc.wantOK)
+func TestACMEReconcileRoots(t *testing.T) {
+	t.Run("selfsigned has no ACME layer", func(t *testing.T) {
+		roots, ok := ACMEReconcileRoots(TLSIssuerSelfSigned)
+		if ok || roots != nil {
+			t.Fatalf("ACMEReconcileRoots(selfsigned) = (%v, %v), want (nil, false)", roots, ok)
+		}
+	})
+
+	// Both ACME issuers share the same two ordered roots, distinguished only by
+	// the substituted ${tls_issuer}/${acme_server} on the ClusterIssuer.
+	for _, issuer := range []string{TLSIssuerLetsEncrypt, TLSIssuerStaging} {
+		t.Run(issuer, func(t *testing.T) {
+			roots, ok := ACMEReconcileRoots(issuer)
+			if !ok {
+				t.Fatalf("ACMEReconcileRoots(%q) ok=false, want true", issuer)
 			}
-			if !tc.wantOK {
-				return
+			if len(roots) != 2 {
+				t.Fatalf("ACMEReconcileRoots(%q) returned %d roots, want 2", issuer, len(roots))
 			}
-			// Both ACME issuers share the single "letsencrypt" root (name + path),
-			// distinguished only by the substituted ${tls_issuer}/${acme_server}.
-			if root.Name != LetsEncryptRootName || root.Path != DefaultLetsEncryptPath {
-				t.Fatalf("ACMEReconcileRoot(%q) = {Name:%q Path:%q}, want {Name:%q Path:%q}",
-					tc.issuer, root.Name, root.Path, LetsEncryptRootName, DefaultLetsEncryptPath)
+
+			// 1. The DNS-01 token ExternalSecret (cloudflare-api-token): no ${...}
+			// placeholders (no substitution), gated on the bitwarden store and the
+			// cert-manager namespace it targets.
+			es := roots[0]
+			if es.Name != CloudflareAPITokenRootName || es.Path != DefaultCloudflareAPITokenPath {
+				t.Fatalf("root[0] = {Name:%q Path:%q}, want {Name:%q Path:%q}",
+					es.Name, es.Path, CloudflareAPITokenRootName, DefaultCloudflareAPITokenPath)
 			}
-			// Substitution must be on so ${tls_issuer}/${acme_server} resolve.
-			if !root.Substitute {
-				t.Fatalf("ACMEReconcileRoot(%q) Substitute=false, want true", tc.issuer)
+			if es.Substitute {
+				t.Fatalf("root[0] Substitute=true, want false (ExternalSecret has no ${...})")
 			}
-			// The ACME issuer layer needs the ClusterIssuer CRD and the bitwarden
-			// store for its DNS-01 token ExternalSecret.
-			wantDeps := map[string]bool{CertManagerConfigName: true, ESOConfigName: true}
-			if len(root.DependsOn) != len(wantDeps) {
-				t.Fatalf("ACMEReconcileRoot(%q) DependsOn=%v, want %v", tc.issuer, root.DependsOn, wantDeps)
+			assertDeps(t, "root[0]", es.DependsOn, CertManagerConfigName, ESOConfigName)
+
+			// 2. The letsencrypt ClusterIssuer: substituted for its identity, and
+			// ordered after the token ExternalSecret so the Secret has synced first.
+			ci := roots[1]
+			if ci.Name != LetsEncryptRootName || ci.Path != DefaultLetsEncryptPath {
+				t.Fatalf("root[1] = {Name:%q Path:%q}, want {Name:%q Path:%q}",
+					ci.Name, ci.Path, LetsEncryptRootName, DefaultLetsEncryptPath)
 			}
-			for _, d := range root.DependsOn {
-				if !wantDeps[d] {
-					t.Fatalf("ACMEReconcileRoot(%q) unexpected dependency %q", tc.issuer, d)
-				}
+			if !ci.Substitute {
+				t.Fatalf("root[1] Substitute=false, want true (${tls_issuer}/${acme_server})")
 			}
+			assertDeps(t, "root[1]", ci.DependsOn, CertManagerConfigName, CloudflareAPITokenRootName)
 		})
+	}
+}
+
+// assertDeps checks that got is exactly the set want, order-independent.
+func assertDeps(t *testing.T, label string, got []string, want ...string) {
+	t.Helper()
+	wantSet := make(map[string]bool, len(want))
+	for _, w := range want {
+		wantSet[w] = true
+	}
+	if len(got) != len(wantSet) {
+		t.Fatalf("%s DependsOn=%v, want %v", label, got, want)
+	}
+	for _, d := range got {
+		if !wantSet[d] {
+			t.Fatalf("%s unexpected dependency %q (want %v)", label, d, want)
+		}
 	}
 }
 
