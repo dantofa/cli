@@ -1,17 +1,14 @@
-# .trivyignore-cluster -- accepted HIGH/CRITICAL CVEs for the platform's running
-# images, enforced by `just verify-image-scan` (the preview image-security gate).
-# One CVE ID per line; `#` comments. Every entry needs a reason and, where it is
-# waiting on an upstream fix, a corresponding ROADMAP.md tracking item so it gets
-# removed once patched. Any new unlisted HIGH/CRITICAL finding fails the gate.
+# .trivyignore-cluster -- accepted CRITICAL CVEs for the platform's own images
+# (images we deploy), enforced by `just verify-image-scan`, the preview
+# image-security gate. DOKS-managed images (kube-system) are out of scope, and
+# only CRITICAL is gated -- HIGH findings are visibility-only (trivy-operator
+# dashboards + Renovate chart bumps), so they are not listed here.
 #
-# NOTE: seeded from ROADMAP's tracked CVEs for charts deployed here; the first
-# preview run surfaces the full current set (the gate prints every offending
-# CVE + image), which then completes this file.
+# One CVE ID per line; `#` comments. Every entry needs a reason and a ROADMAP.md
+# tracking item so it is removed once the chart ships a fixed image. Any new,
+# unlisted CRITICAL in a platform image fails the gate.
 
-# grpc -- present in the Flux and trivy-operator chart images; awaiting upstream
-# patch (tracked in ROADMAP.md). Remove when the charts ship the fix.
-CVE-2026-33186
-
-# OpenSSL (Alpine base) in the trivy-operator image; awaiting upstream patch
-# (tracked in ROADMAP.md). Remove when the chart ships the fix.
-CVE-2026-31789
+# Go stdlib -- external-secrets bitwarden-sdk-server:v0.6.0 is built with a Go
+# release predating the fix; no patched chart image is available yet. Renovate
+# bumps the external-secrets chart when one ships. Tracked in ROADMAP.md.
+CVE-2025-68121

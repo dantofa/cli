@@ -171,10 +171,11 @@ jobs:
           echo "FAILED: origin LB ${lb_ip} reachable directly; Cloudflare-only allowlist not enforced"
           exit 1
 
-      # Image security gate: fail on unsuppressed HIGH/CRITICAL CVEs in the
-      # cluster's running images (trivy-operator VulnerabilityReports vs
-      # .trivyignore-cluster). Placed last so trivy-operator has had the whole run
-      # to scan before the gate reads its reports.
+      # Image security gate: fail on unsuppressed CRITICAL CVEs in the platform
+      # images we deploy (trivy-operator VulnerabilityReports vs
+      # .trivyignore-cluster; DOKS-managed kube-system excluded, HIGH is
+      # visibility-only). Placed last so trivy-operator has had the whole run to
+      # scan before the gate reads its reports.
       - name: Verify image scan (Trivy vulnerability gate)
         run: nix develop --command just verify-image-scan
 

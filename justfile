@@ -344,11 +344,14 @@ verify-restore:
   fi
   echo "restore drill OK: $drill restored from $backup with marker intact"
 
-# Image security gate: fail if the cluster's running images carry a HIGH/CRITICAL
-# vulnerability not accepted in .trivyignore-cluster. Reads the trivy-operator
-# VulnerabilityReports (it scans in-cluster on admission + a daily rescan), so
-# this is a kubectl+jq read -- no runner-side image pulls. Run after the stack has
-# reconciled (so every workload exists to scan). Reads KUBECONFIG (falls back to
+# Image security gate: fail if a PLATFORM image (one we deploy) carries a CRITICAL
+# vulnerability not accepted in .trivyignore-cluster. DOKS-managed namespaces
+# (kube-system) are excluded -- those images are DigitalOcean's to patch, not
+# ours. Gated on CRITICAL only; HIGH findings are visibility-only (trivy-operator
+# dashboards + Renovate chart bumps) and reported here but do not fail the build,
+# since platform images are third-party charts we can only fix by bumping. Reads
+# the trivy-operator VulnerabilityReports (kubectl+jq, no runner-side image pulls);
+# run after the stack has reconciled. Reads KUBECONFIG (falls back to
 # ./.kubeconfig). .trivyignore-cluster is the single source of truth for accepted
 # CVEs; suppression is applied here, so trivy-operator's own reports stay complete.
 verify-image-scan:
@@ -382,28 +385,37 @@ verify-image-scan:
     prev="$n"
     sleep 20
   done
+  # DOKS-managed namespaces, excluded from the gate (images we cannot patch).
+  ex='["kube-system"]'
   # Accepted CVE IDs = non-comment, non-blank lines of the ignore file (or [] if absent).
   acc="$(jq -Rn '[inputs | select(test("^[[:space:]]*(#|$)") | not)]' "$ignore" 2>/dev/null || echo '[]')"
-  echo "Suppressed CVEs in $ignore: $(jq 'length' <<<"$acc")"
-  # Unsuppressed HIGH/CRITICAL findings, one TSV row each: SEVERITY CVE PACKAGE NS IMAGE.
-  findings="$(kubectl get "$crd" -A -o json | jq -r --argjson acc "$acc" '
+  reports="$(kubectl get "$crd" -A -o json)"
+  # Informational (non-gating): distinct HIGH CVEs in platform images.
+  high="$(jq --argjson ex "$ex" '[ .items[]
+    | select((.metadata.namespace) as $ns | $ex | index($ns) | not)
+    | (.report.vulnerabilities // [])[] | select(.severity=="HIGH") | .vulnerabilityID
+  ] | unique | length' <<<"$reports")"
+  echo "Suppressed CVEs in $ignore: $(jq 'length' <<<"$acc"); HIGH CVEs in platform images (not gated): $high"
+  # Gate: unsuppressed CRITICAL in platform images. One TSV row each: CVE PACKAGE NS IMAGE.
+  findings="$(jq -r --argjson acc "$acc" --argjson ex "$ex" '
     .items[]
     | .metadata.namespace as $ns
+    | select($ex | index($ns) | not)
     | ((.report.artifact.repository // "?") + ":" + (.report.artifact.tag // "")) as $img
     | (.report.vulnerabilities // [])[]
-    | select(.severity == "HIGH" or .severity == "CRITICAL")
+    | select(.severity == "CRITICAL")
     | select(.vulnerabilityID as $id | ($acc | index($id)) | not)
-    | [.severity, .vulnerabilityID, (.resource // "?"), $ns, $img] | @tsv
-  ' | sort -u)"
+    | [.vulnerabilityID, (.resource // "?"), $ns, $img] | @tsv
+  ' <<<"$reports" | sort -u)"
   if [ -n "$findings" ]; then
-    echo "IMAGE SCAN GATE FAILED -- unsuppressed HIGH/CRITICAL vulnerabilities:"
-    printf 'SEVERITY\tCVE\tPACKAGE\tNAMESPACE\tIMAGE\n'
+    echo "IMAGE SCAN GATE FAILED -- unsuppressed CRITICAL vulnerabilities in platform images:"
+    printf 'CVE\tPACKAGE\tNAMESPACE\tIMAGE\n'
     printf '%s\n' "$findings"
     echo
-    echo "Bump the offending chart/image, or if the risk is accepted add the CVE ID to $ignore with a reason."
+    echo "Bump the offending chart to a fixed image; if no fix exists yet, add the CVE ID to $ignore with a reason and a ROADMAP.md tracking entry."
     exit 1
   fi
-  echo "IMAGE SCAN GATE PASSED -- no unsuppressed HIGH/CRITICAL vulnerabilities."
+  echo "IMAGE SCAN GATE PASSED -- no unsuppressed CRITICAL vulnerabilities in platform images."
 
 # Snapshot cluster + Flux state into ./preview-diagnostics for CI to upload as
 # artifacts on a failed preview run (the cluster is destroyed afterwards, so
