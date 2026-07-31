@@ -171,6 +171,13 @@ jobs:
           echo "FAILED: origin LB ${lb_ip} reachable directly; Cloudflare-only allowlist not enforced"
           exit 1
 
+      # Image security gate: fail on unsuppressed HIGH/CRITICAL CVEs in the
+      # cluster's running images (trivy-operator VulnerabilityReports vs
+      # .trivyignore-cluster). Placed last so trivy-operator has had the whole run
+      # to scan before the gate reads its reports.
+      - name: Verify image scan (Trivy vulnerability gate)
+        run: nix develop --command just verify-image-scan
+
       # Teardown of the bucket + scoped key the bootstrap created (a completed
       # backup leaves objects, so a plain `space delete` would not suffice).
       - name: Tear down backup bucket

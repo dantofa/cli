@@ -344,6 +344,67 @@ verify-restore:
   fi
   echo "restore drill OK: $drill restored from $backup with marker intact"
 
+# Image security gate: fail if the cluster's running images carry a HIGH/CRITICAL
+# vulnerability not accepted in .trivyignore-cluster. Reads the trivy-operator
+# VulnerabilityReports (it scans in-cluster on admission + a daily rescan), so
+# this is a kubectl+jq read -- no runner-side image pulls. Run after the stack has
+# reconciled (so every workload exists to scan). Reads KUBECONFIG (falls back to
+# ./.kubeconfig). .trivyignore-cluster is the single source of truth for accepted
+# CVEs; suppression is applied here, so trivy-operator's own reports stay complete.
+verify-image-scan:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
+  crd=vulnerabilityreports.aquasecurity.github.io
+  ignore=.trivyignore-cluster
+  # trivy-operator scans asynchronously (a fresh cluster's first scans include a
+  # trivy-DB download), so wait until the report count is non-zero and stops
+  # growing (stable across two polls) before evaluating. Fail closed if no report
+  # ever appears -- a gate that silently passes an unscanned cluster is worthless.
+  echo "Waiting for trivy-operator VulnerabilityReports to stabilize..."
+  deadline=$((SECONDS + 480))
+  prev=-1
+  stable=0
+  while :; do
+    n="$( { kubectl get "$crd" -A --no-headers 2>/dev/null || true; } | wc -l | tr -d ' ')"
+    echo "  reports: $n"
+    if [ "$n" -gt 0 ] && [ "$n" = "$prev" ]; then
+      stable=$((stable + 1))
+      [ "$stable" -ge 2 ] && break
+    else
+      stable=0
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      [ "$n" -eq 0 ] && { echo "no VulnerabilityReports after 480s (trivy-operator did not scan); failing closed"; exit 1; }
+      echo "report count still changing after 480s; evaluating the $n reports present"
+      break
+    fi
+    prev="$n"
+    sleep 20
+  done
+  # Accepted CVE IDs = non-comment, non-blank lines of the ignore file (or [] if absent).
+  acc="$(jq -Rn '[inputs | select(test("^[[:space:]]*(#|$)") | not)]' "$ignore" 2>/dev/null || echo '[]')"
+  echo "Suppressed CVEs in $ignore: $(jq 'length' <<<"$acc")"
+  # Unsuppressed HIGH/CRITICAL findings, one TSV row each: SEVERITY CVE PACKAGE NS IMAGE.
+  findings="$(kubectl get "$crd" -A -o json | jq -r --argjson acc "$acc" '
+    .items[]
+    | .metadata.namespace as $ns
+    | ((.report.artifact.repository // "?") + ":" + (.report.artifact.tag // "")) as $img
+    | (.report.vulnerabilities // [])[]
+    | select(.severity == "HIGH" or .severity == "CRITICAL")
+    | select(.vulnerabilityID as $id | ($acc | index($id)) | not)
+    | [.severity, .vulnerabilityID, (.resource // "?"), $ns, $img] | @tsv
+  ' | sort -u)"
+  if [ -n "$findings" ]; then
+    echo "IMAGE SCAN GATE FAILED -- unsuppressed HIGH/CRITICAL vulnerabilities:"
+    printf 'SEVERITY\tCVE\tPACKAGE\tNAMESPACE\tIMAGE\n'
+    printf '%s\n' "$findings"
+    echo
+    echo "Bump the offending chart/image, or if the risk is accepted add the CVE ID to $ignore with a reason."
+    exit 1
+  fi
+  echo "IMAGE SCAN GATE PASSED -- no unsuppressed HIGH/CRITICAL vulnerabilities."
+
 # Snapshot cluster + Flux state into ./preview-diagnostics for CI to upload as
 # artifacts on a failed preview run (the cluster is destroyed afterwards, so
 # this is the only surviving record). Everything is best-effort: a partial
