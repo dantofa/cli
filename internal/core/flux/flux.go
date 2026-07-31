@@ -60,14 +60,24 @@ const (
 	// DOKS-only — on kind the tunnel controller owns DNS.
 	ExternalDNSRootName    = "external-dns"
 	DefaultExternalDNSPath = "./flux/ingress/external-dns"
+	// CloudflareAPITokenRootName / DefaultCloudflareAPITokenPath is the first half
+	// of the ACME (Let's Encrypt) issuer layer: the Cloudflare DNS-01 token
+	// ExternalSecret (cloudflare-api-token, in the cert-manager namespace) the
+	// letsencrypt ClusterIssuer's solver reads. Split from the issuer itself so
+	// its Secret is guaranteed synced before the issuer is applied. No ${...}
+	// placeholders, so it carries no substitution.
+	CloudflareAPITokenRootName    = "cloudflare-api-token"
+	DefaultCloudflareAPITokenPath = "./flux/ingress/cloudflare-api-token"
 	// LetsEncryptRootName / DefaultLetsEncryptPath is the ACME (Let's Encrypt)
-	// issuer layer: one letsencrypt ClusterIssuer + its Cloudflare DNS-01 token,
-	// shared by both ACME --tls-issuer values (letsencrypt production, staging
-	// CA). The issuer name and ACME endpoint are substituted per cluster from
-	// cluster-vars (${tls_issuer}, ${acme_server}), so the same manifests serve
-	// prod and preview. DOKS-only and deployed only for an ACME issuer; selfsigned
-	// clusters use the always-present selfsigned issuer instead. The Flux
-	// Kustomization is named "letsencrypt" on every cluster regardless of CA.
+	// ClusterIssuer, shared by both ACME --tls-issuer values (letsencrypt
+	// production, staging CA) with the issuer name + ACME endpoint substituted per
+	// cluster (${tls_issuer}, ${acme_server}). It dependsOn cloudflare-api-token
+	// so the DNS-01 token Secret has synced before the issuer is applied:
+	// cert-manager evaluates the solver on apply and pins the issuer InvalidSolver
+	// — without re-reconciling — if the secret is missing, so the two must be
+	// ordered, not co-applied. DOKS-only and deployed only for an ACME issuer;
+	// selfsigned clusters use the always-present selfsigned issuer instead. The
+	// Flux Kustomization is named "letsencrypt" on every cluster regardless of CA.
 	LetsEncryptRootName    = "letsencrypt"
 	DefaultLetsEncryptPath = "./flux/ingress/letsencrypt"
 	// EchoRootName / DefaultEchoPath deploy the echo test backend. kind clusters
@@ -258,7 +268,7 @@ func DNSZone(baseDomain string) (string, error) {
 // ValidateTLSIssuer rejects an unknown --tls-issuer value. The name is also the
 // ClusterIssuer name substituted into the Traefik Certificate, so it must match
 // an issuer the cluster deploys (selfsigned is always present; letsencrypt and
-// staging are each added only for their value, via ACMEReconcileRoot).
+// staging are each added only for their value, via ACMEReconcileRoots).
 func ValidateTLSIssuer(issuer string) error {
 	switch issuer {
 	case TLSIssuerSelfSigned, TLSIssuerLetsEncrypt, TLSIssuerStaging:
@@ -269,28 +279,43 @@ func ValidateTLSIssuer(issuer string) error {
 	}
 }
 
-// ACMEReconcileRoot returns the reconcile root that deploys the ACME
+// ACMEReconcileRoots returns the reconcile roots that deploy the ACME
 // ClusterIssuer for an ACME-backed --tls-issuer (letsencrypt or staging), and
 // ok=false for selfsigned (no ACME layer; the selfsigned issuer ships in
-// cert-manager-config). Both ACME issuers share one root — same name
-// ("letsencrypt") and path on every cluster — with the issuer identity carried
-// by substitution (${tls_issuer}, ${acme_server}), so Substitute is set. The
-// root needs the ClusterIssuer CRD (cert-manager-config) and the bitwarden store
-// for the Cloudflare DNS-01 token ExternalSecret (eso-config); the Traefik
-// Certificate resolves against the issuer asynchronously once it is Ready.
-// Callers must have passed ValidateTLSIssuer first, so an unknown value cannot
-// reach here.
-func ACMEReconcileRoot(issuer string) (ReconcileRoot, bool) {
+// cert-manager-config). Both ACME issuers share the same two roots — same names
+// and paths on every cluster — with the issuer identity carried by substitution
+// (${tls_issuer}, ${acme_server}). The roots are returned in dependency order:
+//
+//  1. cloudflare-api-token — the Cloudflare DNS-01 token ExternalSecret. Needs
+//     the bitwarden store (eso-config) to sync and the cert-manager namespace it
+//     targets (cert-manager-config). No ${...} placeholders, so no substitution.
+//  2. letsencrypt — the ClusterIssuer itself. Needs the ClusterIssuer CRD
+//     (cert-manager-config) and, crucially, the token Secret already synced, so
+//     it dependsOn cloudflare-api-token: cert-manager pins a freshly-applied
+//     issuer InvalidSolver — without re-reconciling — if the secret is absent, so
+//     the two must be ordered, not co-applied. Substituted for the issuer identity.
+//
+// The Traefik Certificate resolves against the issuer asynchronously once it is
+// Ready. Callers must have passed ValidateTLSIssuer first, so an unknown value
+// cannot reach here.
+func ACMEReconcileRoots(issuer string) ([]ReconcileRoot, bool) {
 	switch issuer {
 	case TLSIssuerLetsEncrypt, TLSIssuerStaging:
-		return ReconcileRoot{
-			Name:       LetsEncryptRootName,
-			Path:       DefaultLetsEncryptPath,
-			DependsOn:  []string{CertManagerConfigName, ESOConfigName},
-			Substitute: true,
+		return []ReconcileRoot{
+			{
+				Name:      CloudflareAPITokenRootName,
+				Path:      DefaultCloudflareAPITokenPath,
+				DependsOn: []string{CertManagerConfigName, ESOConfigName},
+			},
+			{
+				Name:       LetsEncryptRootName,
+				Path:       DefaultLetsEncryptPath,
+				DependsOn:  []string{CertManagerConfigName, CloudflareAPITokenRootName},
+				Substitute: true,
+			},
 		}, true
 	default:
-		return ReconcileRoot{}, false
+		return nil, false
 	}
 }
 
