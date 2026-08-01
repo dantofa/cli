@@ -134,6 +134,9 @@
               pkgs.pre-commit
               pkgs.bws
               pkgs.kubectl
+              # jq for the CI integration checks that parse kubectl JSON (e.g. the
+              # trivy-operator image-scan gate); CI only, not a runtimeTool.
+              pkgs.jq
               # velero CLI for the backup-verification integration checks (CI
               # only; dctl never shells out to it, so it is not a runtimeTool).
               pkgs.velero
