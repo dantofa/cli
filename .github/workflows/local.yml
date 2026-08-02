@@ -61,7 +61,7 @@ jobs:
         run: nix run .#default -- flux kustomization verify --wait --timeout 600s --kubeconfig .kubeconfig
 
       - name: Verify Velero backup
-        run: nix develop --command just verify-backup
+        run: nix develop --command just cluster verify backup
 
       - name: Delete local cluster
         if: always()

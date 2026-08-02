@@ -120,12 +120,12 @@ jobs:
       # Backup: waits for Velero + an Available BackupStorageLocation, then proves
       # a backup completes.
       - name: Verify backup
-        run: nix develop --command just verify-backup
+        run: nix develop --command just cluster verify backup
 
       # Restore: back up a throwaway namespace, delete it, restore, assert
       # it returns.
       - name: Verify restore
-        run: nix develop --command just verify-restore
+        run: nix develop --command just cluster verify restore
 
       - name: Tear down backup bucket
         if: always()
@@ -145,7 +145,7 @@ jobs:
           nix develop --command bws run --project-id ${{ vars.BWS_PROJECT_ID }} -- \
             nix run .#default -- digitalocean cluster list \
             >preview-diagnostics/digitalocean-clusters.txt 2>&1 || true
-          nix develop --command just capture-diagnostics || true
+          nix develop --command just cluster debug || true
 
       - name: Upload failure diagnostics
         if: failure()

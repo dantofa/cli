@@ -92,6 +92,32 @@ pre-commit both delegate to it):
 When you add or change a tool invocation, edit the relevant `just` target so CI
 and pre-commit pick it up automatically.
 
+### The reusable `cluster` module (`cluster.just`)
+
+Cluster-ops recipes live in `cluster.just` (imported by the justfile) under one
+namespace — `just cluster debug` (state snapshot), `just cluster verify
+backup|restore|image-scan` (platform-infra checks), `just cluster local
+create|verify|delete|test` (kind lifecycle) — via nested dispatchers that extend
+the `local {{action}}` / `github {{action}}` pattern. It is **shared with
+downstream projects**: the flake exposes it as `packages.cluster-just` (and the
+base accepted-CVE list as `packages.trivyignore-base`), so a downstream repo
+materializes and `import`s it, rev-pinned via its `flake.lock`.
+
+Two rules keep it portable:
+- **Config via env with defaults, never `just` interpolation in bodies.** Recipes
+  read `${DCTL:-nix run github:dantofa/platform#default --}`, `${BASE_DOMAIN:-…}`,
+  `${TRIVYIGNORE_BASE:-…}` etc. as bash (so `just shellcheck` still lints them; a
+  `{{arg}}` body is skipped by the linter). The platform overrides `$DCTL` to
+  `go run ./cmd/dctl` in the flake devShell.
+- **Primitives, not hooks.** The module never calls back into project recipes;
+  consumers write their own compose recipe (create → deploy+test app → delete).
+  The platform's `local-e2e` is exactly that — its echo/tunnel self-test wrapping
+  the shared `cluster local` primitives.
+
+`cluster verify image-scan` merges a mandatory base ignore file (the platform's
+suppressions every downstream inherits) with an optional local one — so downstream
+only tracks its own app-image CVEs.
+
 ## Conventions & constraints
 
 - **Requires Go 1.26.**

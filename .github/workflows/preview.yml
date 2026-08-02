@@ -177,7 +177,7 @@ jobs:
       # visibility-only). Placed last so trivy-operator has had the whole run to
       # scan before the gate reads its reports.
       - name: Verify image scan (Trivy vulnerability gate)
-        run: nix develop --command just verify-image-scan
+        run: nix develop --command just cluster verify image-scan
 
       # Teardown of the bucket + scoped key the bootstrap created (a completed
       # backup leaves objects, so a plain `space delete` would not suffice).
@@ -202,7 +202,7 @@ jobs:
           nix develop --command bws run --project-id ${{ vars.BWS_PROJECT_ID }} -- \
             nix run .#default -- digitalocean cluster list \
             >preview-diagnostics/digitalocean-clusters.txt 2>&1 || true
-          nix develop --command just capture-diagnostics || true
+          nix develop --command just cluster debug || true
 
       - name: Upload failure diagnostics
         if: failure()

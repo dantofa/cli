@@ -96,6 +96,20 @@
     {
       packages = forAllSystems (system: {
         default = dctlFor system;
+        # The reusable cluster-ops justfile module + the base accepted-CVE list, so
+        # a downstream repo (or the devbox plugin) can materialize and import them,
+        # rev-pinned via its flake.lock. Trivial text derivations — they do not
+        # touch the dctl package, its vendorHash, or the version assertion.
+        cluster-just = (pkgsFor system).writeTextFile {
+          name = "cluster-just";
+          destination = "/cluster.just";
+          text = builtins.readFile ./cluster.just;
+        };
+        trivyignore-base = (pkgsFor system).writeTextFile {
+          name = "trivyignore-base";
+          destination = "/.trivyignore-cluster";
+          text = builtins.readFile ./.trivyignore-cluster;
+        };
       });
 
       apps = forAllSystems (system: {
@@ -143,6 +157,10 @@
             ];
             # Local kubeconfig target.
             KUBECONFIG = ".kubeconfig";
+            # In-repo dev runs dctl from source: cluster.just defaults $DCTL to
+            # `nix run …#default --` (for downstream), so override it here to the
+            # working tree, so `just cluster local …` never runs a stale artifact.
+            DCTL = "go run ./cmd/dctl";
             shellHook = ''
               # Put `just build` output on PATH so the fast, cache-backed local
               # build is callable as `dctl` (the intended entrypoint) without a

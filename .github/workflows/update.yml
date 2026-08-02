@@ -165,7 +165,7 @@ jobs:
           nix develop --command bws run --project-id ${{ vars.BWS_PROJECT_ID }} -- \
             nix run .#default -- digitalocean cluster list \
             >preview-diagnostics/digitalocean-clusters.txt 2>&1 || true
-          nix develop --command just capture-diagnostics || true
+          nix develop --command just cluster debug || true
 
       - name: Upload failure diagnostics
         if: failure()
