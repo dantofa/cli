@@ -1,0 +1,21 @@
+{
+  "name": "dantofa-platform-cluster",
+  "description": "dantofa platform cluster-ops for downstream projects: dctl + the CLI toolchain on PATH, and the cluster.just module + base .trivyignore materialized into ./.just for `import`. See https://github.com/dantofa/platform (flux/README + CLAUDE.md).",
+  "packages": [
+    "github:dantofa/platform#default",
+    "github:dantofa/platform#cluster-toolchain",
+    "github:dantofa/platform#cluster-just",
+    "github:dantofa/platform#trivyignore-base"
+  ],
+  "env": {
+    "DCTL": "dctl",
+    "TRIVYIGNORE_BASE": ".just/.trivyignore-base"
+  },
+  "shell": {
+    "init_hook": [
+      "mkdir -p .just",
+      "install -m 0644 \"$DEVBOX_PACKAGES_DIR/cluster.just\" .just/cluster.just",
+      "install -m 0644 \"$DEVBOX_PACKAGES_DIR/trivyignore-cluster\" .just/.trivyignore-base"
+    ]
+  }
+}

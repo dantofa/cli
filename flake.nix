@@ -105,11 +105,32 @@
           destination = "/cluster.just";
           text = builtins.readFile ./cluster.just;
         };
+        # Non-dot destination: a leading-dot filename does not survive the Nix
+        # profile merge devbox uses, so the devbox plugin's init_hook copies this
+        # to ./.just/.trivyignore-base (adding the dot itself).
         trivyignore-base = (pkgsFor system).writeTextFile {
           name = "trivyignore-base";
-          destination = "/.trivyignore-cluster";
+          destination = "/trivyignore-cluster";
           text = builtins.readFile ./.trivyignore-cluster;
         };
+        # The CLIs the cluster.just recipes shell out to (dctl comes from
+        # `default`), pinned to the same nixpkgs as everything else — bundled for
+        # downstream consumers via the devbox plugin so `just cluster …` runs
+        # without a separate install.
+        cluster-toolchain =
+          let
+            pkgs = pkgsFor system;
+          in
+          pkgs.buildEnv {
+            name = "cluster-toolchain";
+            paths = [
+              pkgs.just
+              pkgs.kubectl
+              pkgs.velero
+              pkgs.jq
+              pkgs.fluxcd
+            ];
+          };
       });
 
       apps = forAllSystems (system: {

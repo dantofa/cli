@@ -67,6 +67,9 @@ shellcheck:
       printf '%s\n' "$body" | sed -n '/#!/,$p' | tail -n +2 | shellcheck -s bash -
     fi
   done
+  # Also lint standalone shell scripts shipped in the repo (not justfile recipes),
+  # e.g. the devbox plugin smoke test.
+  shellcheck devbox/*.sh
 
 lint: shellcheck
   #!/usr/bin/env bash
