@@ -1,0 +1,63 @@
+---
+name: devbox
+# Smoke-test the devbox plugin (devbox/plugin.json) against THIS commit: a
+# synthetic downstream consumer includes the plugin (its `github:dantofa/platform`
+# flake refs rewritten to this checkout's flake, so we test the current code, not
+# master), then we assert the toolchain lands on PATH, cluster.just + the base
+# ignore materialize into ./.just, and `just cluster …` dispatches. No cluster is
+# provisioned -- the nix `preview`/`velero` workflows cover real cluster behavior;
+# this validates only the packaging. Path-filtered (not a required check), so it
+# only runs when the plugin, the module, or the flake outputs change.
+on:
+  pull_request:
+    paths:
+      - devbox/**
+      - cluster.just
+      - .trivyignore-cluster
+      - flake.nix
+      - flake.lock
+      - .github/workflows/devbox.yml
+permissions: {}
+env:
+  FORCE_COLOR: ""
+  NO_COLOR: "1"
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'go.sum', '**/*.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      - name: Smoke-test the devbox plugin (synthetic consumer)
+        run: |
+          set -euo pipefail
+          nix profile install nixpkgs#devbox
+          harness="$(mktemp -d)"
+          # Rewrite the plugin's github flake refs to THIS checkout's flake, so the
+          # smoke test exercises the current commit rather than what is on master
+          # (and so new outputs like cluster-toolchain resolve pre-merge).
+          sed "s#github:dantofa/platform#path:${GITHUB_WORKSPACE}#g" \
+            "${GITHUB_WORKSPACE}/devbox/plugin.json" > "${harness}/plugin.json"
+          printf '{\n  "include": ["path:./plugin.json"]\n}\n' > "${harness}/devbox.json"
+          printf "import '.just/cluster.just'\n" > "${harness}/justfile"
+          cd "${harness}"
+          devbox install
+          devbox run -- bash "${GITHUB_WORKSPACE}/devbox/smoke.sh"
