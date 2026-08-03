@@ -360,6 +360,7 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 				fluxcore.VarTLSIssuer:          tlsIssuer,
 				fluxcore.VarACMEServer:         fluxcore.ACMEServerURL(tlsIssuer),
 				fluxcore.VarDNSZone:            dnsZone,
+				fluxcore.VarStorageClass:       fluxcore.StorageClassDOKS,
 			}
 			// Traefik (ingress) and external-dns (DNS) are separate stacks.
 			// Traefik's default cert is issued by cert-manager (Certificate in

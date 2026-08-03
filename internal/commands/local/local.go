@@ -206,6 +206,7 @@ func newLocalBootstrapCmd() *cobra.Command {
 				fluxcore.VarBitwardenOrgID:     bwOrgID,
 				fluxcore.VarBitwardenProjectID: bwProjectID,
 				fluxcore.VarDNSZone:            dnsZone,
+				fluxcore.VarStorageClass:       fluxcore.StorageClassLocal,
 			}
 			res, err := fluxcore.Bootstrap(ctx, fluxclient.New(kubePath), kc, fluxVersion,
 				fluxcore.SourceSpec{
