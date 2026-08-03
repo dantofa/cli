@@ -28,7 +28,7 @@
 ## Platform
 
 - [DONE] Add Trivy deployment manifests
-- Create reusable justfile template for common operations in downstream projects (e.g. local/preview/prod clusters)
-- Create reusable github actions for common workflows in downstream projects
-- Add image security gates
+- [DONE] Create reusable justfile template for common operations in downstream projects (e.g. local/preview/prod clusters)
+- [DONE] Add justfile plugin configuration for downstream project management
+- [DONE] Add image security gate
 - [DEFERRED] Add support for GKE/EKS clusters
