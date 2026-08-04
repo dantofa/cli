@@ -1,0 +1,11 @@
+---
+# The opt-in monitoring tree, reconciled by the `monitoring` root that `dctl …
+# cluster bootstrap --monitoring` applies (path: ./flux/monitoring). Each nested
+# Kustomization's sourceRef uses ${source_kind}/${source_name}, filled by the
+# root's postBuild.substitute per how the cluster was bootstrapped.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - config.yaml
+  - kube-prometheus-stack.yaml
+  - alloy.yaml

@@ -8,6 +8,7 @@ It deploys a fixed platform toolset via Flux:
 - **Base components:** cert-manager, External Secrets Operator, Velero, Kyverno, Trivy Operator.
 - **DOKS:** Traefik, external-dns.
 - **kind (local):** Cloudflare Tunnel controller, SeaweedFS.
+- **With `--monitoring`:** kube-prometheus-stack (Prometheus, Alertmanager, Grafana, node-exporter, kube-state-metrics) + Grafana Alloy.
 
 ## Install
 

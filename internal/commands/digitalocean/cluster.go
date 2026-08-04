@@ -265,6 +265,7 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 		bwToken, bwProjectID, bwOrgID         string
 		namespace, secretName, configMapName  string
 		tlsIssuer                             string
+		monitoring                            bool
 	)
 	cmd := &cobra.Command{
 		Use:   "bootstrap <cluster>",
@@ -399,6 +400,11 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 				roots = append(roots, acme...)
 			}
 			roots = append(roots, ingress)
+			// The opt-in observability stack (heavy); off by default so preview and
+			// the base flows stay lean.
+			if monitoring {
+				roots = append(roots, fluxcore.MonitoringReconcileRoot())
+			}
 			res, err := fluxcore.Bootstrap(ctx, fluxclient.New(kubePath), kc, fluxVersion,
 				fluxcore.SourceSpec{Type: st, Name: src, URL: sourceURL, Revision: sourceRevision},
 				vars, roots)
@@ -429,6 +435,8 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 	_ = cmd.MarkFlagRequired("base-domain")
 	f.StringVar(&tlsIssuer, "tls-issuer", fluxcore.TLSIssuerSelfSigned,
 		`cert-manager ClusterIssuer for the Traefik default cert: "selfsigned" (Cloudflare Full), "letsencrypt" (Full strict, DNS-01), or "staging" (Let's Encrypt staging CA, DNS-01).`)
+	f.BoolVar(&monitoring, "monitoring", false,
+		"Deploy the observability stack (kube-prometheus-stack + Alloy). Heavy; off by default.")
 	f.StringVar(&bwToken, "bitwarden-token", "", "Bitwarden machine-account token for the ESO secret-zero (default $BWS_ACCESS_TOKEN).")
 	f.StringVar(&bwProjectID, "bitwarden-project-id", "", "Bitwarden project ID for the ClusterSecretStore (default $BWS_PROJECT_ID).")
 	f.StringVar(&bwOrgID, "bitwarden-org-id", "", "Bitwarden organization ID for the ClusterSecretStore (default $BWS_ORGANIZATION_ID).")

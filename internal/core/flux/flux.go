@@ -85,6 +85,13 @@ const (
 	// reusable on any cluster type via ./flux/echo.
 	EchoRootName    = "echo"
 	DefaultEchoPath = "./flux/echo"
+	// MonitoringRootName / DefaultMonitoringPath is the opt-in observability stack
+	// (kube-prometheus-stack + Alloy), added only when a cluster is bootstrapped
+	// with --monitoring. It is heavy, so it is not a shared stack every cluster
+	// loads; enable it where there is headroom (a workstation kind cluster, or a
+	// prod/dedicated DOKS cluster).
+	MonitoringRootName    = "monitoring"
+	DefaultMonitoringPath = "./flux/monitoring"
 	// ESOConfigName is the nested Kustomization holding the bitwarden
 	// ClusterSecretStore; the ingress layer dependsOn it (cross-layer) so its
 	// ExternalSecrets can sync.
@@ -330,6 +337,21 @@ func ACMEReconcileRoots(issuer string) ([]ReconcileRoot, bool) {
 		}, true
 	default:
 		return nil, false
+	}
+}
+
+// MonitoringReconcileRoot returns the reconcile root for the opt-in observability
+// stack (kube-prometheus-stack + Alloy), appended when --monitoring is set. It
+// dependsOn eso-config — the Grafana admin-password ExternalSecret needs the
+// bitwarden ClusterSecretStore — and substitutes cluster-vars so the nested stack
+// sourceRefs (${source_kind}/${source_name}) and PVC/ingress values (${storage_class},
+// ${base_domain}) resolve per cluster.
+func MonitoringReconcileRoot() ReconcileRoot {
+	return ReconcileRoot{
+		Name:       MonitoringRootName,
+		Path:       DefaultMonitoringPath,
+		DependsOn:  []string{ESOConfigName},
+		Substitute: true,
 	}
 }
 
