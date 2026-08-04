@@ -1,8 +1,13 @@
 # dantofa platform
 
-`dctl` — the dantofa platform control CLI (and, in time, its operator). A Go
-tool that provisions and manages DigitalOcean / local Kubernetes clusters and
-their platform infrastructure.
+`dctl` — the dantofa platform control CLI (and, in time, its operator). An opinionated bootstrapping tool for
+DigitalOcean and local Kubernetes clusters and components.
+
+It deploys a fixed platform toolset via Flux:
+
+- **Base components:** cert-manager, External Secrets Operator, Velero, Kyverno, Trivy Operator.
+- **DOKS:** Traefik, external-dns.
+- **kind (local):** Cloudflare Tunnel controller, SeaweedFS.
 
 ## Install
 
@@ -14,15 +19,7 @@ Run it once:
 nix run github:dantofa/platform -- --help
 ```
 
-Install into your profile:
-
-```bash
-nix profile install github:dantofa/platform
-```
-
-The build wraps `dctl` so kind, flux, docker, and git travel in its closure — no
-separate install (a running Docker daemon is still a host prerequisite). Pin a
-commit by appending it: `github:dantofa/platform/<rev>`.
+Pin a commit by appending it: `github:dantofa/platform/<rev>`.
 
 Consume it as a flake input:
 
@@ -31,9 +28,6 @@ inputs.dantofa-platform.url = "github:dantofa/platform";
 # per system: dantofa-platform.packages.${system}.default   # the wrapped dctl
 ```
 
-`nix flake update` locks the latest `master` commit, and `dctl --version`
-reports it as `0.0.0.dev<date>+g<sha>`.
-
 ## Usage
 
 ```bash
@@ -41,14 +35,53 @@ $ dctl --help
 $ dctl --version
 ```
 
+## Just
+
+The project also ships a reusable [`just`](https://github.com/casey/just)
+module — `cluster.just` — that downstream projects can import to operate any
+cluster they provision:
+
+```bash
+just cluster debug                              # snapshot cluster + Flux state
+just cluster verify backup|restore|image-scan   # verify platform infra
+just cluster local  create|verify|delete|test   # kind cluster lifecycle
+```
+
+Two ways to consume it, both rev-pinned via your lockfile:
+
+- **devbox** — `include` the plugin:
+
+  ```json
+  { "include": ["github:dantofa/platform?dir=devbox"] }
+  ```
+
+- **Nix flake** — the module and base ignore list are flake outputs
+  (`packages.cluster-just`, `packages.trivyignore-base`); materialize them into
+  `./.just` in your dev shell.
+
+Either way `.just/cluster.just` lands in your project; import it and compose your
+own end-to-end flow over the primitives:
+
+```just
+import '.just/cluster.just'
+
+# Your own compose recipe over the shared primitives:
+e2e:
+  just cluster local create
+  just deploy-my-app
+  just test-my-app
+  just cluster local delete
+```
+
+Config comes from the environment (`DCTL`, `BASE_DOMAIN`, `TRIVYIGNORE_BASE` /
+`TRIVYIGNORE_LOCAL`) with sane defaults.
+
 ## Development
 
-Requires [Nix](https://nixos.org/) with flakes. The flake dev shell provides the
-Go toolchain (go, gopls, golangci-lint, gofumpt, govulncheck) plus generic
-tooling (just, kind/flux/docker/git, kubectl, bws, linters). Enter it with `nix
-develop` (or [`direnv`](https://direnv.net/)) — this also installs the
-pre-commit hook. Copy `.env.example` to `.env` for local secrets (e.g. the
-Bitwarden access token); the shell loads it automatically.
+Requires [Nix](https://nixos.org/) with flakes. Enter the dev shell with `nix develop` (or
+[`direnv`](https://direnv.net/)) — this also installs the pre-commit hook. Copy
+`.env.example` to `.env` for local secrets (e.g. the Bitwarden access token); the
+shell loads it automatically.
 
 Common tasks run via [`just`](https://github.com/casey/just):
 

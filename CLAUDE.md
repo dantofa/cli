@@ -54,6 +54,42 @@ the `clients` adapter mechanically maps that spec to the `godo` request type
 adapter). Do not "tidy" these into pass-through builders: if a caller ever
 legitimately needs to *not* enforce an invariant, add a parameter deliberately.
 
+## GitOps tree (`flux/`)
+
+Flux reconciles the platform stacks from one source (`platform`). `dctl … cluster
+bootstrap` installs Flux, registers the source (a `GitRepository` on DOKS, an
+`OCIRepository` on kind), and applies the **reconcile roots** as Kustomization CRs
+via client-go — not `flux create kustomization`, which can't express
+`postBuild.substituteFrom` or `dependsOn` — each with `wait: true`, so a root is
+Ready only once the objects it applies are (what `dependsOn` and the `dctl flux
+kustomization verify` gate rely on).
+
+- `flux/cluster/` — the shared, source-agnostic stacks every cluster loads (the
+  `cluster` root, `path: ./flux/cluster`): **cert-manager, External Secrets
+  Operator, Velero, Kyverno, Trivy**. A per-cluster-type **ingress** layer loads
+  after (`flux/ingress/traefik` + `external-dns` on DOKS, `flux/ingress/tunnel` on
+  kind), plus the ACME issuer layer (`flux/ingress/letsencrypt`) for
+  `--tls-issuer letsencrypt|staging`.
+- `flux/local/` — kind-only requirements (the `local-requirements` root): an
+  in-cluster SeaweedFS S3 store standing in for a cloud bucket. OCI-only; the
+  `cluster` root `dependsOn` it so the backup target exists before Velero.
+
+Add a shared stack by dropping `<stack>.yaml` + a `<stack>/` directory into
+`flux/cluster/` and listing it in `flux/cluster/kustomization.yaml` (one line) —
+**and add the deployed tool to the toolset list in `README.md`** (that list is the
+single user-facing record of what the platform deploys; keep it in sync).
+
+**cluster-vars + substitution.** Bootstrap writes a `cluster-vars` ConfigMap
+(`source_kind`, `source_name`, `base_domain`, `cluster_name`, `tls_issuer`,
+`acme_server`, `dns_zone`, …) in `flux-system`; substituting roots carry
+`postBuild.substituteFrom` it, so the portable manifests resolve `${…}` to
+per-cluster values. Substitution is **two-scoped**: the `cluster` root fills
+`${source_kind}`/`${base_domain}`/etc. from `cluster-vars`; the nested `velero`
+Kustomization fills `${bucket}`/`${region}`/`${endpoint}` from the `backup-target`
+ConfigMap (namespace-scoped, one level down). On DOKS `dctl` writes `backup-target`
+plus the `backup-credential` Secret (a bucket-scoped Spaces key — the DO token
+never enters the cluster); on kind both come from `flux/local`.
+
 ## The two-tier tooling rule (important)
 
 Dependencies are split by purpose:
