@@ -90,6 +90,14 @@ ConfigMap (namespace-scoped, one level down). On DOKS `dctl` writes `backup-targ
 plus the `backup-credential` Secret (a bucket-scoped Spaces key — the DO token
 never enters the cluster); on kind both come from `flux/local`.
 
+**Secrets.** Secrets that are a source of truth (API tokens, machine-account
+credentials) come from Bitwarden via ESO ExternalSecrets against the `bitwarden`
+ClusterSecretStore. **Disposable, cluster-local secrets** (no external source of
+truth — e.g. a generated admin password) are minted **in-cluster** by an ESO
+`Password` generator (`generators.external-secrets.io`), consumed by an
+ExternalSecret via `dataFrom.sourceRef.generatorRef` — no bitwarden entry, no
+manual step (see `flux/monitoring/config`).
+
 ## The two-tier tooling rule (important)
 
 Dependencies are split by purpose:

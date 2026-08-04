@@ -1,0 +1,17 @@
+---
+# ESO Password generator: produces a random password ENTIRELY IN-CLUSTER — it
+# never calls an external secrets engine (bitwarden/AWS/etc.). This is the
+# platform's way to mint disposable, cluster-local secrets. Consumed by the
+# grafana-admin ExternalSecret (dataFrom.sourceRef.generatorRef).
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  name: grafana-admin
+  namespace: monitoring
+spec:
+  length: 24
+  digits: 5
+  symbols: 3
+  symbolCharacters: "-_@"
+  noUpper: false
+  allowRepeat: true
