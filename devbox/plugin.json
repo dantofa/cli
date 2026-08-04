@@ -1,6 +1,6 @@
 {
   "name": "dantofa-platform-cluster",
-  "description": "dantofa platform cluster-ops for downstream projects: dctl + the CLI toolchain on PATH, and the cluster.just module + base .trivyignore materialized into ./.just for `import`. See https://github.com/dantofa/platform (flux/README + CLAUDE.md).",
+  "description": "dantofa platform cluster-ops for downstream projects: dctl + the CLI toolchain on PATH, and the cluster.just module + base .trivyignore materialized into ./.just for `import`. See https://github.com/dantofa/platform.",
   "packages": [
     "github:dantofa/platform#default",
     "github:dantofa/platform#cluster-toolchain",
