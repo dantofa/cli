@@ -123,6 +123,12 @@ const (
 	// e.g. dantofa.dev. external-dns filters zones by their apex, so it must be
 	// the registrable domain, not base_domain (a subdomain would exclude the zone).
 	VarDNSZone = "dns_zone"
+	// VarStorageClass is the Kubernetes StorageClass stateful stacks provision
+	// their PVCs from (${storage_class}), written by dctl at bootstrap. It is per
+	// cluster type — StorageClassDOKS or StorageClassLocal — so a portable manifest
+	// binds to whichever the cluster provides (the class names differ, and a single
+	// StorageClass manifest cannot span both provisioners).
+	VarStorageClass = "storage_class"
 
 	// clusterVarsNamespace is where the ConfigMap and reconcile roots live.
 	clusterVarsNamespace = "flux-system"
@@ -235,6 +241,14 @@ const (
 const (
 	ACMEServerLetsEncrypt = "https://acme-v02.api.letsencrypt.org/directory"
 	ACMEServerStaging     = "https://acme-staging-v02.api.letsencrypt.org/directory"
+)
+
+// StorageClass names written as ${storage_class} per cluster type: DOKS ships the
+// managed do-block-storage CSI class (default); kind ships the local-path
+// "standard" class (default, already used by the local SeaweedFS store).
+const (
+	StorageClassDOKS  = "do-block-storage"
+	StorageClassLocal = "standard"
 )
 
 // ACMEServerURL maps an ACME-backed --tls-issuer to its ACME directory endpoint,
