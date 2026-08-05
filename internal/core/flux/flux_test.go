@@ -395,6 +395,76 @@ func TestACMEReconcileRoots(t *testing.T) {
 	}
 }
 
+func TestDOKSIngressRoots(t *testing.T) {
+	// Default (no --dolb): a single Cloudflare Tunnel root, the same as kind — no
+	// LoadBalancer, no external-dns, no ACME. tlsIssuer is inert here, so even an
+	// ACME value yields only the tunnel root.
+	for _, issuer := range []string{TLSIssuerSelfSigned, TLSIssuerLetsEncrypt, TLSIssuerStaging} {
+		t.Run("tunnel/"+issuer, func(t *testing.T) {
+			roots := DOKSIngressRoots(false, issuer)
+			if len(roots) != 1 {
+				t.Fatalf("DOKSIngressRoots(false, %q) returned %d roots, want 1: %+v", issuer, len(roots), roots)
+			}
+			r := roots[0]
+			if r.Name != IngressRootName || r.Path != DefaultTunnelIngressPath {
+				t.Fatalf("tunnel root = {Name:%q Path:%q}, want {Name:%q Path:%q}",
+					r.Name, r.Path, IngressRootName, DefaultTunnelIngressPath)
+			}
+			if !r.Substitute {
+				t.Fatalf("tunnel root Substitute=false, want true (tunnel_name is ${cluster_name})")
+			}
+			assertDeps(t, "tunnel root", r.DependsOn, ESOConfigName)
+		})
+	}
+
+	// --dolb, selfsigned: external-dns + Traefik, no ACME layer. The ingress
+	// (Traefik) root waits only on cert-manager-config (the selfsigned issuer).
+	t.Run("dolb/selfsigned", func(t *testing.T) {
+		roots := DOKSIngressRoots(true, TLSIssuerSelfSigned)
+		if len(roots) != 2 {
+			t.Fatalf("DOKSIngressRoots(true, selfsigned) returned %d roots, want 2: %+v", len(roots), roots)
+		}
+		ingress := findRoot(t, roots, IngressRootName)
+		if ingress.Path != DefaultRemoteIngressPath {
+			t.Fatalf("ingress root Path=%q, want %q", ingress.Path, DefaultRemoteIngressPath)
+		}
+		assertDeps(t, "ingress root", ingress.DependsOn, CertManagerConfigName)
+		edns := findRoot(t, roots, ExternalDNSRootName)
+		if edns.Path != DefaultExternalDNSPath {
+			t.Fatalf("external-dns root Path=%q, want %q", edns.Path, DefaultExternalDNSPath)
+		}
+		assertDeps(t, "external-dns root", edns.DependsOn, ESOConfigName)
+	})
+
+	// --dolb, ACME issuer: external-dns + the two ACME roots + Traefik, and the
+	// ingress root additionally waits on the letsencrypt issuer.
+	for _, issuer := range []string{TLSIssuerLetsEncrypt, TLSIssuerStaging} {
+		t.Run("dolb/"+issuer, func(t *testing.T) {
+			roots := DOKSIngressRoots(true, issuer)
+			if len(roots) != 4 {
+				t.Fatalf("DOKSIngressRoots(true, %q) returned %d roots, want 4: %+v", issuer, len(roots), roots)
+			}
+			findRoot(t, roots, ExternalDNSRootName)
+			findRoot(t, roots, CloudflareAPITokenRootName)
+			findRoot(t, roots, LetsEncryptRootName)
+			ingress := findRoot(t, roots, IngressRootName)
+			assertDeps(t, "ingress root", ingress.DependsOn, CertManagerConfigName, LetsEncryptRootName)
+		})
+	}
+}
+
+// findRoot returns the reconcile root named name, failing if it is absent.
+func findRoot(t *testing.T, roots []ReconcileRoot, name string) ReconcileRoot {
+	t.Helper()
+	for _, r := range roots {
+		if r.Name == name {
+			return r
+		}
+	}
+	t.Fatalf("no reconcile root named %q in %+v", name, roots)
+	return ReconcileRoot{}
+}
+
 // assertDeps checks that got is exactly the set want, order-independent.
 func assertDeps(t *testing.T, label string, got []string, want ...string) {
 	t.Helper()

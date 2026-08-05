@@ -1,7 +1,8 @@
 ---
 # Portable across cluster types: no ingressClassName, so it uses the cluster's
-# default IngressClass (cloudflare-tunnel on kind, nginx on DOKS). Hosted at the
-# cluster's base_domain (e.g. local.dantofa.dev) rather than a subdomain: that
+# default IngressClass (cloudflare-tunnel by default; traefik on a --dolb DOKS
+# cluster). Hosted at the cluster's base_domain (e.g. local.dantofa.dev) rather
+# than a subdomain: that
 # keeps it one level under the zone apex, which Cloudflare Universal SSL
 # (*.dantofa.dev) covers — a per-service subdomain (echo.local.dantofa.dev) would
 # be two levels deep and need Advanced Certificate Manager. Served under a /echo

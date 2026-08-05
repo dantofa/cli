@@ -6,7 +6,7 @@ DigitalOcean and local Kubernetes clusters and components.
 It deploys a fixed platform toolset via Flux:
 
 - **Base components:** cert-manager, External Secrets Operator, Velero, Kyverno, Trivy Operator.
-- **DOKS:** Traefik, external-dns.
+- **DOKS:** Cloudflare Tunnel controller by default (outbound-only, no LoadBalancer); with `--dolb`, Traefik + external-dns behind a DO LoadBalancer instead.
 - **kind (local):** Cloudflare Tunnel controller, SeaweedFS.
 - **With `--monitoring`:** kube-prometheus-stack (Prometheus, Alertmanager, Grafana, node-exporter, kube-state-metrics) + Grafana Alloy.
 

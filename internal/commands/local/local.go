@@ -183,7 +183,7 @@ func newLocalBootstrapCmd() *cobra.Command {
 				// waits on eso-config (a cross-layer dependency).
 				{
 					Name:       fluxcore.IngressRootName,
-					Path:       fluxcore.DefaultLocalIngressPath,
+					Path:       fluxcore.DefaultTunnelIngressPath,
 					DependsOn:  []string{fluxcore.ESOConfigName},
 					Substitute: true,
 				},
