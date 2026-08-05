@@ -131,7 +131,7 @@ jobs:
         run: |
           retries=24
           sleep=10
-          url="https://${BASE_DOMAIN}"
+          url="https://${BASE_DOMAIN}/echo"
           for i in $(seq 1 ${retries}); do
             if body="$(curl -fsS --max-time 8 "$url")" \
               && printf '%s' "$body" | grep -q "${BASE_DOMAIN}"; then
