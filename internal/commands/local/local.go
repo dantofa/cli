@@ -95,6 +95,7 @@ func newLocalBootstrapCmd() *cobra.Command {
 		fluxVersion, registryName, artifactName, tag string
 		sourceName, baseDomain                       string
 		bwToken, bwProjectID, bwOrgID                string
+		monitoring                                   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "bootstrap [name]",
@@ -182,7 +183,7 @@ func newLocalBootstrapCmd() *cobra.Command {
 				// waits on eso-config (a cross-layer dependency).
 				{
 					Name:       fluxcore.IngressRootName,
-					Path:       fluxcore.DefaultLocalIngressPath,
+					Path:       fluxcore.DefaultTunnelIngressPath,
 					DependsOn:  []string{fluxcore.ESOConfigName},
 					Substitute: true,
 				},
@@ -195,6 +196,11 @@ func newLocalBootstrapCmd() *cobra.Command {
 					DependsOn:  []string{fluxcore.IngressRootName},
 					Substitute: true,
 				},
+			}
+			// The opt-in observability stack (heavy); enable on a workstation kind
+			// cluster that has the headroom.
+			if monitoring {
+				roots = append(roots, fluxcore.MonitoringReconcileRoot())
 			}
 			dnsZone, err := fluxcore.DNSZone(baseDomain)
 			if err != nil {
@@ -232,6 +238,8 @@ func newLocalBootstrapCmd() *cobra.Command {
 	f.StringVarP(&tag, "tag", "t", localcore.DefaultArtifactTag, "OCI tag to track.")
 	f.StringVar(&sourceName, "source-name", fluxcore.DefaultSourceName, "Name of the Flux OCIRepository the roots pull from.")
 	f.StringVar(&baseDomain, "base-domain", "", "Cluster ingress FQDN (${base_domain} in cluster-vars). Required; for local, a wildcard-DNS value like 127.0.0.1.nip.io resolves to localhost.")
+	f.BoolVar(&monitoring, "monitoring", false,
+		"Deploy the observability stack (kube-prometheus-stack + Alloy). Heavy; off by default.")
 	_ = cmd.MarkFlagRequired("base-domain")
 	f.StringVar(&bwToken, "bitwarden-token", "", "Bitwarden machine-account token for the ESO secret-zero (default $BWS_ACCESS_TOKEN).")
 	f.StringVar(&bwProjectID, "bitwarden-project-id", "", "Bitwarden project ID for the ClusterSecretStore (default $BWS_PROJECT_ID).")

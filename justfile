@@ -140,7 +140,7 @@ sast:
 
 # Full local (kind) tunnel e2e for the PLATFORM itself -- the platform's own
 # compose recipe over the shared `cluster local` primitives, adding the parts that
-# are platform self-tests: echo reachable at the apex through the live Cloudflare
+# are platform self-tests: echo reachable at /echo through the live Cloudflare
 # tunnel, and that the graceful teardown actually reaps the tunnel object (the leak
 # PR #18 fixed). Requires the dev shell (kind/flux/kubectl/curl/jq/bws on PATH) and
 # BWS_ACCESS_TOKEN / BWS_PROJECT_ID / BWS_ORGANIZATION_ID in the environment. Uses
@@ -153,11 +153,11 @@ local-e2e:
   cluster=local
   just cluster local create
   just cluster local verify
-  # Platform app-test: echo served at the apex through the tunnel + Cloudflare.
+  # Platform app-test: echo served at /echo through the tunnel + Cloudflare.
   export KUBECONFIG=.kubeconfig
   retries=24
   sleep=10
-  url="https://$base_domain"
+  url="https://$base_domain/echo"
   echo "Probing ${url} through the Cloudflare tunnel..."
   for i in $(seq 1 "$retries"); do
     if body="$(curl -fsS --max-time 8 "$url")" \

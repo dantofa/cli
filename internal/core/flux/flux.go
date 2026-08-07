@@ -48,12 +48,12 @@ const (
 	ClusterRootName           = "cluster"
 	LocalRequirementsRootName = "local-requirements"
 	IngressRootName           = "ingress"
-	// DefaultLocalIngressPath is kind's ingress layer: the Cloudflare Tunnel
-	// controller (outbound, no LoadBalancer). DefaultRemoteIngressPath is the
-	// DOKS layer: Traefik + external-dns behind a DO LoadBalancer, proxied by
-	// Cloudflare. Both set their controller as the default IngressClass, so the
-	// same vanilla Ingress objects route on either.
-	DefaultLocalIngressPath  = "./flux/ingress/tunnel"
+	// DefaultTunnelIngressPath is the Cloudflare Tunnel ingress layer (outbound,
+	// no LoadBalancer): the default on kind and, unless --dolb is given, on DOKS
+	// too. DefaultRemoteIngressPath is the DOKS --dolb layer: Traefik + external-dns
+	// behind a DO LoadBalancer, proxied by Cloudflare. Both set their controller as
+	// the default IngressClass, so the same vanilla Ingress objects route on either.
+	DefaultTunnelIngressPath = "./flux/ingress/tunnel"
 	DefaultRemoteIngressPath = "./flux/ingress/traefik"
 	// ExternalDNSRootName / DefaultExternalDNSPath is the DOKS DNS layer:
 	// external-dns (Cloudflare). It is its own stack (controller-agnostic) and
@@ -85,6 +85,13 @@ const (
 	// reusable on any cluster type via ./flux/echo.
 	EchoRootName    = "echo"
 	DefaultEchoPath = "./flux/echo"
+	// MonitoringRootName / DefaultMonitoringPath is the opt-in observability stack
+	// (kube-prometheus-stack + Alloy), added only when a cluster is bootstrapped
+	// with --monitoring. It is heavy, so it is not a shared stack every cluster
+	// loads; enable it where there is headroom (a workstation kind cluster, or a
+	// prod/dedicated DOKS cluster).
+	MonitoringRootName    = "monitoring"
+	DefaultMonitoringPath = "./flux/monitoring"
 	// ESOConfigName is the nested Kustomization holding the bitwarden
 	// ClusterSecretStore; the ingress layer dependsOn it (cross-layer) so its
 	// ExternalSecrets can sync.
@@ -330,6 +337,82 @@ func ACMEReconcileRoots(issuer string) ([]ReconcileRoot, bool) {
 		}, true
 	default:
 		return nil, false
+	}
+}
+
+// DOKSIngressRoots returns the ingress-layer reconcile roots for a DOKS cluster.
+//
+// The default (dolb=false) is the Cloudflare Tunnel controller — the same
+// outbound-only, LoadBalancer-free ingress kind clusters use (DefaultTunnelIngressPath):
+// Cloudflare terminates edge TLS and the controller owns DNS, so there is no DO
+// LoadBalancer (the bulk of the cluster's cost), no external-dns, and no
+// ACME/cert-manager cert. tlsIssuer is inert in this mode. The single root
+// dependsOn eso-config (the controller pulls its cloudflare-api secret from
+// bitwarden via ESO) and substitutes cluster-vars — tunnel_name is ${cluster_name},
+// which the teardown tunnel-reap (ResolveTunnel/DeleteTunnelByName) resolves the
+// tunnel by, so the DOKS tunnel lifecycle matches local's.
+//
+// With --dolb (dolb=true) it returns the LoadBalancer path unchanged: external-dns
+// (Cloudflare DNS from Ingress status) + the ACME issuer layer when tlsIssuer is an
+// ACME value (letsencrypt/staging) + Traefik (the default IngressClass, behind a DO
+// LoadBalancer locked to Cloudflare's IPs). tlsIssuer names the ClusterIssuer the
+// Traefik default cert is issued by; callers must ValidateTLSIssuer first.
+func DOKSIngressRoots(dolb bool, tlsIssuer string) []ReconcileRoot {
+	if !dolb {
+		return []ReconcileRoot{
+			{
+				Name:       IngressRootName,
+				Path:       DefaultTunnelIngressPath,
+				DependsOn:  []string{ESOConfigName},
+				Substitute: true,
+			},
+		}
+	}
+	// Traefik (ingress) and external-dns (DNS) are separate stacks. Traefik's
+	// default cert is issued by cert-manager (${tls_issuer} ClusterIssuer), so it
+	// waits on cert-manager-config (Certificate CRD + the always-present selfsigned
+	// issuer); external-dns pulls its Cloudflare token from bws, so it waits on
+	// eso-config.
+	ingress := ReconcileRoot{
+		Name:       IngressRootName,
+		Path:       DefaultRemoteIngressPath,
+		DependsOn:  []string{CertManagerConfigName},
+		Substitute: true,
+	}
+	roots := []ReconcileRoot{
+		{
+			Name:       ExternalDNSRootName,
+			Path:       DefaultExternalDNSPath,
+			DependsOn:  []string{ESOConfigName},
+			Substitute: true,
+		},
+	}
+	// The ACME issuer layer (letsencrypt production or the staging CA) is added
+	// only when the Traefik cert is issued by one; selfsigned needs none (it ships
+	// in cert-manager-config). The ingress layer must also wait on the issuer: the
+	// Traefik Certificate names the ${tls_issuer} ClusterIssuer, so that issuer
+	// must exist before the Certificate is applied — else the CertificateRequest
+	// fails IssuerNotFound and issuance stalls (the ACME issuer lives in its own
+	// root, unlike the selfsigned one).
+	if acme, ok := ACMEReconcileRoots(tlsIssuer); ok {
+		ingress.DependsOn = append(ingress.DependsOn, LetsEncryptRootName)
+		roots = append(roots, acme...)
+	}
+	return append(roots, ingress)
+}
+
+// MonitoringReconcileRoot returns the reconcile root for the opt-in observability
+// stack (kube-prometheus-stack + Alloy), appended when --monitoring is set. It
+// dependsOn eso-config — the Grafana admin-password ExternalSecret needs the
+// bitwarden ClusterSecretStore — and substitutes cluster-vars so the nested stack
+// sourceRefs (${source_kind}/${source_name}) and PVC/ingress values (${storage_class},
+// ${base_domain}) resolve per cluster.
+func MonitoringReconcileRoot() ReconcileRoot {
+	return ReconcileRoot{
+		Name:       MonitoringRootName,
+		Path:       DefaultMonitoringPath,
+		DependsOn:  []string{ESOConfigName},
+		Substitute: true,
 	}
 }
 

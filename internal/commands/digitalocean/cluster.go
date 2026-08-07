@@ -265,6 +265,8 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 		bwToken, bwProjectID, bwOrgID         string
 		namespace, secretName, configMapName  string
 		tlsIssuer                             string
+		monitoring                            bool
+		dolb                                  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "bootstrap <cluster>",
@@ -362,43 +364,28 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 				fluxcore.VarDNSZone:            dnsZone,
 				fluxcore.VarStorageClass:       fluxcore.StorageClassDOKS,
 			}
-			// Traefik (ingress) and external-dns (DNS) are separate stacks.
-			// Traefik's default cert is issued by cert-manager (Certificate in
-			// certificate.yaml, ${tls_issuer} ClusterIssuer), so it waits on
-			// cert-manager-config (Certificate CRD + the always-present selfsigned
-			// issuer); external-dns pulls its Cloudflare token from bws, so it
-			// waits on eso-config.
-			ingress := fluxcore.ReconcileRoot{
-				Name:       fluxcore.IngressRootName,
-				Path:       fluxcore.DefaultRemoteIngressPath,
-				DependsOn:  []string{fluxcore.CertManagerConfigName},
-				Substitute: true,
+			// Ingress layer. The default is the Cloudflare Tunnel controller
+			// (outbound, no DO LoadBalancer — the bulk of the cluster's cost),
+			// exactly as on kind; --dolb selects the LoadBalancer path instead
+			// (Traefik + external-dns + the ACME issuer layer). Core owns the whole
+			// branch — path/name mapping, dependency wiring, and the tlsIssuer →
+			// ACME roots decision. --tls-issuer only names the Traefik default cert
+			// issuer, so it is inert without --dolb: warn rather than silently drop
+			// a non-default value (Cloudflare terminates TLS at the tunnel edge).
+			if !dolb && tlsIssuer != fluxcore.TLSIssuerSelfSigned {
+				fmt.Fprintf(os.Stderr,
+					"warning: --tls-issuer %q is ignored without --dolb (the Cloudflare Tunnel terminates TLS at the edge)\n",
+					tlsIssuer)
 			}
 			roots := []fluxcore.ReconcileRoot{
 				{Name: fluxcore.ClusterRootName, Path: sourcePath, Substitute: true},
-				{
-					Name:       fluxcore.ExternalDNSRootName,
-					Path:       fluxcore.DefaultExternalDNSPath,
-					DependsOn:  []string{fluxcore.ESOConfigName},
-					Substitute: true,
-				},
 			}
-			// An ACME issuer layer (letsencrypt production or the letsencrypt
-			// staging CA) is added only when the Traefik cert is issued by one;
-			// selfsigned needs none (it ships in cert-manager-config). Core owns
-			// the issuer → path/name mapping and its dependencies, returning two
-			// ordered roots: the Cloudflare DNS-01 token ExternalSecret
-			// (cloudflare-api-token), then the letsencrypt ClusterIssuer that
-			// dependsOn it. The ingress layer must also wait on the issuer: the
-			// Traefik Certificate names the ${tls_issuer} ClusterIssuer, so that
-			// issuer must exist before the Certificate is applied — else the
-			// CertificateRequest fails IssuerNotFound and issuance stalls (the ACME
-			// issuer lives in its own root, unlike the selfsigned one).
-			if acme, ok := fluxcore.ACMEReconcileRoots(tlsIssuer); ok {
-				ingress.DependsOn = append(ingress.DependsOn, fluxcore.LetsEncryptRootName)
-				roots = append(roots, acme...)
+			roots = append(roots, fluxcore.DOKSIngressRoots(dolb, tlsIssuer)...)
+			// The opt-in observability stack (heavy); off by default so preview and
+			// the base flows stay lean.
+			if monitoring {
+				roots = append(roots, fluxcore.MonitoringReconcileRoot())
 			}
-			roots = append(roots, ingress)
 			res, err := fluxcore.Bootstrap(ctx, fluxclient.New(kubePath), kc, fluxVersion,
 				fluxcore.SourceSpec{Type: st, Name: src, URL: sourceURL, Revision: sourceRevision},
 				vars, roots)
@@ -428,7 +415,11 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 	f.StringVar(&baseDomain, "base-domain", "", "Cluster ingress FQDN (${base_domain} in cluster-vars). Required.")
 	_ = cmd.MarkFlagRequired("base-domain")
 	f.StringVar(&tlsIssuer, "tls-issuer", fluxcore.TLSIssuerSelfSigned,
-		`cert-manager ClusterIssuer for the Traefik default cert: "selfsigned" (Cloudflare Full), "letsencrypt" (Full strict, DNS-01), or "staging" (Let's Encrypt staging CA, DNS-01).`)
+		`cert-manager ClusterIssuer for the Traefik default cert (only with --dolb): "selfsigned" (Cloudflare Full), "letsencrypt" (Full strict, DNS-01), or "staging" (Let's Encrypt staging CA, DNS-01).`)
+	f.BoolVar(&dolb, "dolb", false,
+		"Use a DO LoadBalancer ingress (Traefik + external-dns) instead of the default Cloudflare Tunnel. Adds LoadBalancer cost.")
+	f.BoolVar(&monitoring, "monitoring", false,
+		"Deploy the observability stack (kube-prometheus-stack + Alloy). Heavy; off by default.")
 	f.StringVar(&bwToken, "bitwarden-token", "", "Bitwarden machine-account token for the ESO secret-zero (default $BWS_ACCESS_TOKEN).")
 	f.StringVar(&bwProjectID, "bitwarden-project-id", "", "Bitwarden project ID for the ClusterSecretStore (default $BWS_PROJECT_ID).")
 	f.StringVar(&bwOrgID, "bitwarden-org-id", "", "Bitwarden organization ID for the ClusterSecretStore (default $BWS_ORGANIZATION_ID).")
