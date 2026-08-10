@@ -1,0 +1,9 @@
+---
+# The shared monitoring namespace: home of the base collection layer (Alloy /
+# k8s-monitoring), the local Prometheus store, and the opt-in Grafana instance.
+# Owned here (the local store is the foundational base stack); other monitoring
+# stacks dependsOn this one rather than re-declaring the namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring

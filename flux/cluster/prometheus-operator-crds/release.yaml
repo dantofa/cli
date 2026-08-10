@@ -1,0 +1,27 @@
+---
+# CRD-only chart: installs the prometheus-operator CustomResourceDefinitions and
+# nothing else (no operator Deployment). CRDs are templated as regular manifests
+# by this chart, so they are pruned/upgraded like any other resource.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: prometheus-operator-crds
+  namespace: flux-system
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: prometheus-operator-crds
+      # Exact pin; bumped by Renovate (flux manager).
+      version: "31.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+      interval: 10m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
