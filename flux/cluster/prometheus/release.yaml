@@ -54,7 +54,27 @@ spec:
           memory: 256Mi
         limits:
           memory: 512Mi
-    # Pure receiver: no scrape targets of its own (Alloy remote_writes here).
-    serverFiles:
-      prometheus.yml:
-        scrape_configs: []
+    # Pure receiver: Alloy (k8s-monitoring) does all scraping and remote_writes
+    # here, so disable every default scrape job the chart would generate (v29
+    # builds prometheus.yml's scrape_configs from this map, not from serverFiles).
+    scrapeConfigs:
+      prometheus:
+        enabled: false
+      kubernetes-api-servers:
+        enabled: false
+      kubernetes-nodes:
+        enabled: false
+      kubernetes-nodes-cadvisor:
+        enabled: false
+      kubernetes-service-endpoints:
+        enabled: false
+      kubernetes-service-endpoints-slow:
+        enabled: false
+      prometheus-pushgateway:
+        enabled: false
+      kubernetes-services:
+        enabled: false
+      kubernetes-pods:
+        enabled: false
+      kubernetes-pods-slow:
+        enabled: false
