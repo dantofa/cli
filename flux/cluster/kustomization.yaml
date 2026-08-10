@@ -18,3 +18,4 @@ resources:
   - grafana-operator.yaml
   - prometheus-operator-crds.yaml
   - prometheus.yaml
+  - k8s-monitoring.yaml

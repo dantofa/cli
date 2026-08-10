@@ -1,0 +1,63 @@
+---
+# k8s-monitoring (v4): one Alloy metrics collector scrapes cluster + host + pod
+# metrics and any ServiceMonitor/PodMonitor objects, then remote_writes to the
+# local Prometheus (destination #1). It also deploys node-exporter and
+# kube-state-metrics (telemetryServices). Metrics-only for now — logs/traces stay
+# at their disabled defaults until a Loki/Tempo backend lands; a remote
+# destination (Grafana Cloud / remote Prometheus) is added later as destination
+# #2 with its own allowlist + cluster/env labels. cluster.name is substituted
+# from ${cluster_name}.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: k8s-monitoring
+  namespace: monitoring
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: k8s-monitoring
+      # Exact pin; bumped by Renovate (flux manager).
+      version: "4.3.2"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: monitoring
+      interval: 10m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    cluster:
+      name: ${cluster_name}
+    # Destination #1: the always-on local Prometheus remote-write receiver.
+    destinations:
+      localPrometheus:
+        type: prometheus
+        url: http://prometheus-server.monitoring.svc.cluster.local:80/api/v1/write
+    # The single metrics collector every feature below runs on.
+    collectors:
+      alloy-metrics:
+        presets: [clustered, statefulset]
+    # Deploy the exporters the metrics features scrape.
+    telemetryServices:
+      kube-state-metrics:
+        deploy: true
+      node-exporter:
+        deploy: true
+    # Metrics features (logs/traces/events left at their disabled defaults).
+    clusterMetrics:
+      enabled: true
+      collector: alloy-metrics
+    hostMetrics:
+      enabled: true
+      collector: alloy-metrics
+    prometheusOperatorObjects:
+      enabled: true
+      collector: alloy-metrics
+    annotationAutodiscovery:
+      enabled: true
+      collector: alloy-metrics
