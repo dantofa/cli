@@ -1,0 +1,28 @@
+---
+# The opt-in in-cluster Grafana (a grafana-operator Grafana CR + Prometheus
+# datasource + ingress). dependsOn monitoring-config (the generated grafana-admin
+# Secret must exist for the instance's admin env). The Grafana/GrafanaDatasource
+# CRDs and the `monitoring` namespace come from base stacks (grafana-operator,
+# prometheus); the monitoring reconcile root dependsOn those. Its own
+# postBuild.substituteFrom cluster-vars fills ${base_domain} in the Grafana config
+# + ingress (the monitoring root fills ${source_kind}/${source_name} here).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: grafana
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./flux/monitoring/grafana
+  prune: true
+  wait: true
+  dependsOn:
+    - name: monitoring-config
+  sourceRef:
+    kind: ${source_kind}
+    name: ${source_name}
+    namespace: flux-system
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

@@ -1,8 +1,10 @@
 ---
-# Monitoring namespace + the Grafana admin ExternalSecret; the kube-prometheus-stack
-# and alloy stacks dependsOn it (namespace exists, admin secret synced). The
-# `monitoring` reconcile root dependsOn eso-config, so the bitwarden
-# ClusterSecretStore exists before this ExternalSecret syncs.
+# The Grafana admin ExternalSecret (generated in-cluster by an ESO Password
+# generator); the grafana stack dependsOn it so the admin secret is synced before
+# the Grafana instance starts. The `monitoring` namespace is owned by the base
+# prometheus stack now, so this stack only mints the secret into it. The
+# `monitoring` reconcile root dependsOn eso-config, so ESO is running before this
+# ExternalSecret syncs.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:

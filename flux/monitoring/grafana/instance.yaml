@@ -1,0 +1,47 @@
+---
+# The opt-in in-cluster Grafana, managed by grafana-operator (base stack). The
+# `dashboards: dantofa` label is what GrafanaDatasource/GrafanaDashboard CRs select
+# via instanceSelector — the same CRs can also target a Grafana Cloud instance in a
+# later stage. Admin credentials come from the generated grafana-admin Secret
+# (ESO Password generator) via GF_SECURITY_ADMIN_* env, which Grafana reads
+# natively. Served under /grafana (serve_from_sub_path) behind the cluster's
+# default ingress; ${base_domain} is substituted by the grafana Kustomization.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: Grafana
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    dashboards: dantofa
+spec:
+  config:
+    server:
+      domain: ${base_domain}
+      root_url: "%(protocol)s://%(domain)s/grafana/"
+      serve_from_sub_path: "true"
+    analytics:
+      reporting_enabled: "false"
+      check_for_updates: "false"
+  deployment:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: grafana
+              env:
+                - name: GF_SECURITY_ADMIN_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: grafana-admin
+                      key: admin-user
+                - name: GF_SECURITY_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: grafana-admin
+                      key: admin-password
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 256Mi

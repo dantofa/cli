@@ -1,0 +1,22 @@
+---
+# The default Prometheus datasource, reconciled into the Grafana instance(s) whose
+# labels match instanceSelector. Points at the always-on local Prometheus store
+# (base stack) that Alloy remote_writes into. timeInterval matches Alloy's 60s
+# scrape so range steps line up.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: dantofa
+  datasource:
+    name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus-server.monitoring.svc.cluster.local:80
+    isDefault: true
+    jsonData:
+      timeInterval: "60s"

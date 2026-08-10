@@ -85,17 +85,25 @@ const (
 	// reusable on any cluster type via ./flux/echo.
 	EchoRootName    = "echo"
 	DefaultEchoPath = "./flux/echo"
-	// MonitoringRootName / DefaultMonitoringPath is the opt-in observability stack
-	// (kube-prometheus-stack + Alloy), added only when a cluster is bootstrapped
-	// with --monitoring. It is heavy, so it is not a shared stack every cluster
-	// loads; enable it where there is headroom (a workstation kind cluster, or a
-	// prod/dedicated DOKS cluster).
+	// MonitoringRootName / DefaultMonitoringPath is the opt-in in-cluster Grafana
+	// server (a grafana-operator Grafana CR + Prometheus datasource), added only
+	// when a cluster is bootstrapped with --monitoring. The collection layer (Alloy
+	// + node-exporter + kube-state-metrics via k8s-monitoring) and the local
+	// Prometheus store are unconditional base stacks (flux/cluster); this root only
+	// adds the visualization server, so it is light — the heavy always-on pieces
+	// live in the base.
 	MonitoringRootName    = "monitoring"
 	DefaultMonitoringPath = "./flux/monitoring"
 	// ESOConfigName is the nested Kustomization holding the bitwarden
 	// ClusterSecretStore; the ingress layer dependsOn it (cross-layer) so its
 	// ExternalSecrets can sync.
 	ESOConfigName = "eso-config"
+	// GrafanaOperatorName / PrometheusName are base-stack Kustomizations (flux/cluster)
+	// the monitoring root dependsOn: grafana-operator supplies the Grafana /
+	// GrafanaDatasource CRDs the root's CRs need, and the prometheus stack owns the
+	// `monitoring` namespace and the store the datasource points at.
+	GrafanaOperatorName = "grafana-operator"
+	PrometheusName      = "prometheus"
 	// CertManagerConfigName is the nested Kustomization holding the selfsigned
 	// ClusterIssuer; the Traefik ingress layer dependsOn it (cross-layer) so the
 	// Certificate CRD is established and the selfsigned issuer exists.
@@ -401,17 +409,19 @@ func DOKSIngressRoots(dolb bool, tlsIssuer string) []ReconcileRoot {
 	return append(roots, ingress)
 }
 
-// MonitoringReconcileRoot returns the reconcile root for the opt-in observability
-// stack (kube-prometheus-stack + Alloy), appended when --monitoring is set. It
-// dependsOn eso-config — the Grafana admin-password ExternalSecret needs the
-// bitwarden ClusterSecretStore — and substitutes cluster-vars so the nested stack
-// sourceRefs (${source_kind}/${source_name}) and PVC/ingress values (${storage_class},
-// ${base_domain}) resolve per cluster.
+// MonitoringReconcileRoot returns the reconcile root for the opt-in in-cluster
+// Grafana server (a Grafana CR + Prometheus datasource + ingress), appended when
+// --monitoring is set. It dependsOn eso-config (the generated Grafana admin
+// ExternalSecret needs ESO), grafana-operator (the Grafana/GrafanaDatasource CRDs
+// its CRs are), and prometheus (which owns the `monitoring` namespace and is the
+// datasource's store). It substitutes cluster-vars so the nested sourceRefs
+// (${source_kind}/${source_name}) and the Grafana ingress host (${base_domain})
+// resolve per cluster.
 func MonitoringReconcileRoot() ReconcileRoot {
 	return ReconcileRoot{
 		Name:       MonitoringRootName,
 		Path:       DefaultMonitoringPath,
-		DependsOn:  []string{ESOConfigName},
+		DependsOn:  []string{ESOConfigName, GrafanaOperatorName, PrometheusName},
 		Substitute: true,
 	}
 }
