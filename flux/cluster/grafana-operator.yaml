@@ -1,0 +1,25 @@
+---
+# The Grafana Operator, a shared stack the `cluster` reconcile root loads on every
+# cluster type. It installs the operator and its CRDs (Grafana, GrafanaDashboard,
+# GrafanaDatasource, …) so dashboards and datasources are managed declaratively as
+# Kubernetes objects, reconciled into either an in-cluster Grafana or an external
+# one (incl. Grafana Cloud) via a Grafana CR's instanceSelector. Deployed
+# unconditionally as base infrastructure; the Grafana instances and the
+# dashboard/datasource CRs are a later stage. It has no admission webhook, so
+# unlike ESO it needs no cert-manager dependency. Source-agnostic sourceRef
+# (${source_kind}/${source_name} from the root's substitution); wait is set so a
+# later dependsOn only proceeds once the operator and its CRDs are established.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: grafana-operator
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./flux/cluster/grafana-operator
+  prune: true
+  wait: true
+  sourceRef:
+    kind: ${source_kind}
+    name: ${source_name}
+    namespace: flux-system
