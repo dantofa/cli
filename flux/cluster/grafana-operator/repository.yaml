@@ -1,0 +1,13 @@
+---
+# The grafana-operator chart is published as an OCI artifact (no classic index),
+# so the HelmRepository is type: oci and the url is the registry path without the
+# chart name (release.yaml appends `grafana-operator`).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: grafana-operator
+  namespace: grafana-system
+spec:
+  type: oci
+  interval: 1h
+  url: oci://ghcr.io/grafana/helm-charts
