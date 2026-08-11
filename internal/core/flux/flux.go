@@ -102,7 +102,7 @@ const (
 	// receiver PVC (${storage_class}) and the destination's cluster external label
 	// (${cluster_name}).
 	MetricsRemoteRootName    = "metrics-remote"
-	DefaultMetricsRemotePath = "./flux/metrics-remote"
+	DefaultMetricsRemotePath = "./flux/test/prometheus"
 	// ESOConfigName is the nested Kustomization holding the bitwarden
 	// ClusterSecretStore; the ingress layer dependsOn it (cross-layer) so its
 	// ExternalSecrets can sync.

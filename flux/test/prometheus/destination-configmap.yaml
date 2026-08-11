@@ -6,10 +6,13 @@
 # same root and tags metrics with the `cluster` external label — the mechanism a
 # shared remote/Grafana Cloud stack uses to tell clusters apart.
 #
-# No allowlist yet: `metricProcessingRules` (per-destination write_relabel rules)
-# is where the curated subset goes once the secondary's active-series/DPM
-# measurement shows which metrics to keep. Until then the secondary mirrors the
-# local store, giving the baseline "un-curated" cost number.
+# metricProcessingRules is a per-destination write_relabel that curates what this
+# (remote/billed) destination receives WITHOUT touching the full-fidelity local
+# store. This is a conservative starter denylist — it drops the highest-cardinality
+# noise the secondary's seriesCountByMetricName surfaced (all-zero status reasons +
+# kubelet/apiserver histogram buckets) rather than a strict allowlist, so it is
+# safe before Stage 4 dashboards exist. Tune it against the measured active series
+# / DPM; once dashboards pin what is actually queried, tighten to a keep-list.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -23,3 +26,9 @@ data:
         url: http://prometheus-remote-server.monitoring.svc.cluster.local:80/api/v1/write
         extraLabels:
           cluster: ${cluster_name}
+        metricProcessingRules: |
+          write_relabel_config {
+            source_labels = ["__name__"]
+            regex = "kube_pod_status_reason|kubelet_.+_bucket|apiserver_.+_bucket"
+            action = "drop"
+          }
