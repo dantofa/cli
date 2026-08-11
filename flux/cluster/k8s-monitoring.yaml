@@ -1,0 +1,30 @@
+---
+# The unconditional collection layer (Grafana k8s-monitoring): a single Alloy
+# instance scrapes cluster/host/pod metrics + ServiceMonitor/PodMonitor objects
+# and remote_writes to the local Prometheus (destination #1). A shared base stack
+# — every cluster collects and retains metrics locally with no cloud dependency.
+# dependsOn prometheus-operator-crds (the ServiceMonitor/PodMonitor types must
+# exist to be discovered) and prometheus (the `monitoring` namespace + the
+# remote_write sink). postBuild.substituteFrom cluster-vars resolves
+# ${cluster_name} for the metrics' cluster label. Source-agnostic sourceRef.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: k8s-monitoring
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./flux/cluster/k8s-monitoring
+  prune: true
+  wait: true
+  dependsOn:
+    - name: prometheus-operator-crds
+    - name: prometheus
+  sourceRef:
+    kind: ${source_kind}
+    name: ${source_name}
+    namespace: flux-system
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

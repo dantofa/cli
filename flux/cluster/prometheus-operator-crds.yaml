@@ -1,0 +1,24 @@
+---
+# The prometheus-operator CRDs (ServiceMonitor, PodMonitor, PrometheusRule,
+# Probe, ScrapeConfig, …) — CRDs ONLY, no operator/controller. A shared base
+# stack so the ServiceMonitor/PodMonitor convention keeps working after
+# kube-prometheus-stack was retired: the k8s-monitoring Alloy honors these
+# objects (and downstream charts ship them). Cluster-scoped CRDs, so the
+# HelmRelease lives in flux-system and the stack has no namespace dependency;
+# wait is set so consumers (k8s-monitoring) that reference the CRD types only
+# reconcile once they are established. Source-agnostic sourceRef
+# (${source_kind}/${source_name} from the root's substitution).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: prometheus-operator-crds
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./flux/cluster/prometheus-operator-crds
+  prune: true
+  wait: true
+  sourceRef:
+    kind: ${source_kind}
+    name: ${source_name}
+    namespace: flux-system

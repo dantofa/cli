@@ -7,5 +7,4 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - config.yaml
-  - kube-prometheus-stack.yaml
-  - alloy.yaml
+  - grafana.yaml

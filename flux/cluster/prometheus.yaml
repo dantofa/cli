@@ -1,0 +1,28 @@
+---
+# The always-on local Prometheus: the base metrics store and Alloy's destination
+# #1. A shared base stack — every cluster retains recent metrics locally with no
+# cloud dependency. Owns the `monitoring` namespace (the collection layer and the
+# opt-in Grafana install into it and dependsOn this stack). It is a pure
+# remote-write receiver: Alloy (k8s-monitoring) does all scraping and remote_writes
+# here, so Prometheus's own scrape_configs are emptied to avoid double collection.
+# postBuild.substituteFrom cluster-vars resolves ${storage_class} in the PVC
+# (do-block-storage on DOKS, standard on kind). wait is set so consumers that
+# dependsOn it only proceed once the store is up.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: prometheus
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./flux/cluster/prometheus
+  prune: true
+  wait: true
+  sourceRef:
+    kind: ${source_kind}
+    name: ${source_name}
+    namespace: flux-system
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars
