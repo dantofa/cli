@@ -58,8 +58,11 @@ spec:
     # here, so disable every default scrape job the chart would generate (v29
     # builds prometheus.yml's scrape_configs from this map, not from serverFiles).
     scrapeConfigs:
+      # Keep the self-scrape (localhost:9090) so the store self-monitors — its own
+      # tsdb head series + samples-appended metrics are how we measure active
+      # series and DPM (what a remote/Grafana Cloud backend would bill).
       prometheus:
-        enabled: false
+        enabled: true
       kubernetes-api-servers:
         enabled: false
       kubernetes-nodes:

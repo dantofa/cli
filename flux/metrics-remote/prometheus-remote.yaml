@@ -56,8 +56,11 @@ spec:
     # Pure receiver: it only stores what Alloy remote_writes; disable every
     # default scrape job the chart would otherwise generate.
     scrapeConfigs:
+      # Self-scrape (localhost:9090) so this receiver self-monitors: its tsdb head
+      # series + samples-appended metrics are how we measure the active series and
+      # DPM a remote / Grafana Cloud backend would bill for this destination.
       prometheus:
-        enabled: false
+        enabled: true
       kubernetes-api-servers:
         enabled: false
       kubernetes-nodes:
