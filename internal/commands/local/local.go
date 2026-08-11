@@ -96,6 +96,7 @@ func newLocalBootstrapCmd() *cobra.Command {
 		sourceName, baseDomain                       string
 		bwToken, bwProjectID, bwOrgID                string
 		monitoring                                   bool
+		metricsRemote                                bool
 	)
 	cmd := &cobra.Command{
 		Use:   "bootstrap [name]",
@@ -202,6 +203,12 @@ func newLocalBootstrapCmd() *cobra.Command {
 			if monitoring {
 				roots = append(roots, fluxcore.MonitoringReconcileRoot())
 			}
+			// Opt-in remote metrics destination: a secondary in-cluster Prometheus
+			// receiver + a second Alloy remote_write destination (a GC/remote
+			// stand-in for measuring active series + DPM locally).
+			if metricsRemote {
+				roots = append(roots, fluxcore.MetricsRemoteReconcileRoot())
+			}
 			dnsZone, err := fluxcore.DNSZone(baseDomain)
 			if err != nil {
 				return render.Fail(err)
@@ -239,7 +246,9 @@ func newLocalBootstrapCmd() *cobra.Command {
 	f.StringVar(&sourceName, "source-name", fluxcore.DefaultSourceName, "Name of the Flux OCIRepository the roots pull from.")
 	f.StringVar(&baseDomain, "base-domain", "", "Cluster ingress FQDN (${base_domain} in cluster-vars). Required; for local, a wildcard-DNS value like 127.0.0.1.nip.io resolves to localhost.")
 	f.BoolVar(&monitoring, "monitoring", false,
-		"Deploy the observability stack (kube-prometheus-stack + Alloy). Heavy; off by default.")
+		"Deploy the in-cluster Grafana server (grafana-operator) with the local Prometheus datasource. Collection is always on; this adds visualization.")
+	f.BoolVar(&metricsRemote, "metrics-remote", false,
+		"Deploy a secondary in-cluster Prometheus receiver and forward metrics to it (a remote/Grafana-Cloud stand-in for measuring active series + DPM).")
 	_ = cmd.MarkFlagRequired("base-domain")
 	f.StringVar(&bwToken, "bitwarden-token", "", "Bitwarden machine-account token for the ESO secret-zero (default $BWS_ACCESS_TOKEN).")
 	f.StringVar(&bwProjectID, "bitwarden-project-id", "", "Bitwarden project ID for the ClusterSecretStore (default $BWS_PROJECT_ID).")

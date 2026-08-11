@@ -30,6 +30,15 @@ spec:
   upgrade:
     remediation:
       retries: 3
+  # Optional hook for the --metrics-remote root: when that root is deployed it
+  # supplies this ConfigMap, which deep-merges a second remote_write destination
+  # into the values below. Absent by default (optional: true), so the base stack
+  # ships only the local Prometheus destination. Flux re-reconciles the release
+  # when the ConfigMap appears/changes.
+  valuesFrom:
+    - kind: ConfigMap
+      name: k8s-monitoring-remote-destination
+      optional: true
   values:
     cluster:
       name: ${cluster_name}

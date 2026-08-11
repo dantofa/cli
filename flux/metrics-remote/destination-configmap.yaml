@@ -1,0 +1,25 @@
+---
+# Supplies a SECOND remote_write destination to the always-on k8s-monitoring
+# Alloy: the base HelmRelease references this ConfigMap via an optional valuesFrom,
+# so it deep-merges alongside the built-in localPrometheus destination (both
+# receive the scraped metrics). Points at the secondary Prometheus receiver in this
+# same root and tags metrics with the `cluster` external label — the mechanism a
+# shared remote/Grafana Cloud stack uses to tell clusters apart.
+#
+# No allowlist yet: `metricProcessingRules` (per-destination write_relabel rules)
+# is where the curated subset goes once the secondary's active-series/DPM
+# measurement shows which metrics to keep. Until then the secondary mirrors the
+# local store, giving the baseline "un-curated" cost number.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-monitoring-remote-destination
+  namespace: monitoring
+data:
+  values.yaml: |
+    destinations:
+      remote:
+        type: prometheus
+        url: http://prometheus-remote-server.monitoring.svc.cluster.local:80/api/v1/write
+        extraLabels:
+          cluster: ${cluster_name}

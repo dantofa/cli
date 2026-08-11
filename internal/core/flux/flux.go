@@ -94,6 +94,15 @@ const (
 	// live in the base.
 	MonitoringRootName    = "monitoring"
 	DefaultMonitoringPath = "./flux/monitoring"
+	// MetricsRemoteRootName / DefaultMetricsRemotePath is the opt-in remote metrics
+	// destination (--metrics-remote): a secondary in-cluster Prometheus receiver (a
+	// Grafana-Cloud/remote stand-in for preview + local) plus a ConfigMap that adds
+	// a second remote_write destination to the always-on k8s-monitoring Alloy, which
+	// references it via an optional valuesFrom. Substitutes cluster-vars for the
+	// receiver PVC (${storage_class}) and the destination's cluster external label
+	// (${cluster_name}).
+	MetricsRemoteRootName    = "metrics-remote"
+	DefaultMetricsRemotePath = "./flux/metrics-remote"
 	// ESOConfigName is the nested Kustomization holding the bitwarden
 	// ClusterSecretStore; the ingress layer dependsOn it (cross-layer) so its
 	// ExternalSecrets can sync.
@@ -422,6 +431,23 @@ func MonitoringReconcileRoot() ReconcileRoot {
 		Name:       MonitoringRootName,
 		Path:       DefaultMonitoringPath,
 		DependsOn:  []string{ESOConfigName, GrafanaOperatorName, PrometheusName},
+		Substitute: true,
+	}
+}
+
+// MetricsRemoteReconcileRoot returns the reconcile root for the opt-in remote
+// metrics destination (--metrics-remote). It deploys a secondary Prometheus
+// receiver and the k8s-monitoring-remote-destination ConfigMap that the always-on
+// k8s-monitoring HelmRelease merges via valuesFrom, adding a second remote_write
+// destination (the base stack keeps only the local destination when this root is
+// absent). dependsOn prometheus for the `monitoring` namespace and the
+// prometheus-community HelmRepository it reuses; substitutes cluster-vars for the
+// receiver PVC (${storage_class}) and the cluster external label (${cluster_name}).
+func MetricsRemoteReconcileRoot() ReconcileRoot {
+	return ReconcileRoot{
+		Name:       MetricsRemoteRootName,
+		Path:       DefaultMetricsRemotePath,
+		DependsOn:  []string{PrometheusName},
 		Substitute: true,
 	}
 }

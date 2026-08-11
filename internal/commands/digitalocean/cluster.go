@@ -266,6 +266,7 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 		namespace, secretName, configMapName  string
 		tlsIssuer                             string
 		monitoring                            bool
+		metricsRemote                         bool
 		dolb                                  bool
 	)
 	cmd := &cobra.Command{
@@ -386,6 +387,12 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 			if monitoring {
 				roots = append(roots, fluxcore.MonitoringReconcileRoot())
 			}
+			// Opt-in remote metrics destination: a secondary in-cluster Prometheus
+			// receiver + a second Alloy remote_write destination (a GC/remote
+			// stand-in; on DOKS this is later repointed at Grafana Cloud).
+			if metricsRemote {
+				roots = append(roots, fluxcore.MetricsRemoteReconcileRoot())
+			}
 			res, err := fluxcore.Bootstrap(ctx, fluxclient.New(kubePath), kc, fluxVersion,
 				fluxcore.SourceSpec{Type: st, Name: src, URL: sourceURL, Revision: sourceRevision},
 				vars, roots)
@@ -419,7 +426,9 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 	f.BoolVar(&dolb, "dolb", false,
 		"Use a DO LoadBalancer ingress (Traefik + external-dns) instead of the default Cloudflare Tunnel. Adds LoadBalancer cost.")
 	f.BoolVar(&monitoring, "monitoring", false,
-		"Deploy the observability stack (kube-prometheus-stack + Alloy). Heavy; off by default.")
+		"Deploy the in-cluster Grafana server (grafana-operator) with the local Prometheus datasource. Collection is always on; this adds visualization.")
+	f.BoolVar(&metricsRemote, "metrics-remote", false,
+		"Deploy a secondary in-cluster Prometheus receiver and forward metrics to it (a remote/Grafana-Cloud stand-in for measuring active series + DPM).")
 	f.StringVar(&bwToken, "bitwarden-token", "", "Bitwarden machine-account token for the ESO secret-zero (default $BWS_ACCESS_TOKEN).")
 	f.StringVar(&bwProjectID, "bitwarden-project-id", "", "Bitwarden project ID for the ClusterSecretStore (default $BWS_PROJECT_ID).")
 	f.StringVar(&bwOrgID, "bitwarden-org-id", "", "Bitwarden organization ID for the ClusterSecretStore (default $BWS_ORGANIZATION_ID).")
