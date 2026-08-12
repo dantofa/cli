@@ -30,14 +30,18 @@ spec:
   upgrade:
     remediation:
       retries: 3
-  # Optional hook for the --metrics-remote root: when that root is deployed it
-  # supplies this ConfigMap, which deep-merges a second remote_write destination
-  # into the values below. Absent by default (optional: true), so the base stack
-  # ships only the local Prometheus destination. Flux re-reconciles the release
-  # when the ConfigMap appears/changes.
+  # Optional hooks for the opt-in remote-destination roots: each supplies a
+  # ConfigMap that deep-merges an extra remote_write destination into the values
+  # below. Both absent by default (optional: true), so the base stack ships only
+  # the local Prometheus destination; Flux re-reconciles when one appears/changes.
+  # - k8s-monitoring-remote-destination: the in-cluster secondary (--metrics-remote)
+  # - k8s-monitoring-grafana-cloud:       Grafana Cloud (--grafana-cloud)
   valuesFrom:
     - kind: ConfigMap
       name: k8s-monitoring-remote-destination
+      optional: true
+    - kind: ConfigMap
+      name: k8s-monitoring-grafana-cloud
       optional: true
   values:
     cluster:

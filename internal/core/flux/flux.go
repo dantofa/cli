@@ -103,6 +103,16 @@ const (
 	// (${cluster_name}).
 	MetricsRemoteRootName    = "metrics-remote"
 	DefaultMetricsRemotePath = "./flux/test/prometheus"
+	// GrafanaCloudRootName / DefaultGrafanaCloudPath is the opt-in Grafana Cloud
+	// metrics destination (--grafana-cloud): an ESO ExternalSecret pulling the
+	// GRAFANA_CLOUD_ACCESS_{URL,USER,TOKEN} trio from bitwarden into the
+	// grafana-cloud-access Secret, plus a ConfigMap adding a GC remote_write
+	// destination (url + basic auth from that Secret, curated by the same allowlist,
+	// tagged ${cluster_name}/${env}) to the always-on k8s-monitoring Alloy via its
+	// optional valuesFrom. The real-remote counterpart to the in-cluster
+	// metrics-remote stand-in; used on a deliberately chosen cluster, never preview.
+	GrafanaCloudRootName    = "grafana-cloud"
+	DefaultGrafanaCloudPath = "./flux/grafana-cloud"
 	// ESOConfigName is the nested Kustomization holding the bitwarden
 	// ClusterSecretStore; the ingress layer dependsOn it (cross-layer) so its
 	// ExternalSecrets can sync.
@@ -153,6 +163,10 @@ const (
 	// binds to whichever the cluster provides (the class names differ, and a single
 	// StorageClass manifest cannot span both provisioners).
 	VarStorageClass = "storage_class"
+	// VarEnv is the deployment environment label (${env}, e.g. local/preview/prod)
+	// applied to metrics forwarded to a shared remote stack (Grafana Cloud) so one
+	// stack can tell clusters apart alongside ${cluster_name}. Set from --env.
+	VarEnv = "env"
 
 	// clusterVarsNamespace is where the ConfigMap and reconcile roots live.
 	clusterVarsNamespace = "flux-system"
@@ -448,6 +462,22 @@ func MetricsRemoteReconcileRoot() ReconcileRoot {
 		Name:       MetricsRemoteRootName,
 		Path:       DefaultMetricsRemotePath,
 		DependsOn:  []string{PrometheusName},
+		Substitute: true,
+	}
+}
+
+// GrafanaCloudReconcileRoot returns the reconcile root for the opt-in Grafana
+// Cloud metrics destination (--grafana-cloud). It creates the ESO ExternalSecret
+// (bitwarden → grafana-cloud-access) and the ConfigMap that the always-on
+// k8s-monitoring HelmRelease merges via valuesFrom, forwarding a curated,
+// ${cluster_name}/${env}-labelled subset to Grafana Cloud. dependsOn eso-config
+// (the ExternalSecret needs the bitwarden ClusterSecretStore) and prometheus (the
+// `monitoring` namespace); substitutes cluster-vars for the external labels.
+func GrafanaCloudReconcileRoot() ReconcileRoot {
+	return ReconcileRoot{
+		Name:       GrafanaCloudRootName,
+		Path:       DefaultGrafanaCloudPath,
+		DependsOn:  []string{ESOConfigName, PrometheusName},
 		Substitute: true,
 	}
 }

@@ -265,8 +265,10 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 		bwToken, bwProjectID, bwOrgID         string
 		namespace, secretName, configMapName  string
 		tlsIssuer                             string
+		env                                   string
 		monitoring                            bool
 		metricsRemote                         bool
+		grafanaCloud                          bool
 		dolb                                  bool
 	)
 	cmd := &cobra.Command{
@@ -364,6 +366,7 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 				fluxcore.VarACMEServer:         fluxcore.ACMEServerURL(tlsIssuer),
 				fluxcore.VarDNSZone:            dnsZone,
 				fluxcore.VarStorageClass:       fluxcore.StorageClassDOKS,
+				fluxcore.VarEnv:                env,
 			}
 			// Ingress layer. The default is the Cloudflare Tunnel controller
 			// (outbound, no DO LoadBalancer — the bulk of the cluster's cost),
@@ -392,6 +395,11 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 			// stand-in; on DOKS this is later repointed at Grafana Cloud).
 			if metricsRemote {
 				roots = append(roots, fluxcore.MetricsRemoteReconcileRoot())
+			}
+			// Opt-in Grafana Cloud metrics destination (the real remote; needs the
+			// GRAFANA_CLOUD_ACCESS_* bws secrets). Independent of --metrics-remote.
+			if grafanaCloud {
+				roots = append(roots, fluxcore.GrafanaCloudReconcileRoot())
 			}
 			res, err := fluxcore.Bootstrap(ctx, fluxclient.New(kubePath), kc, fluxVersion,
 				fluxcore.SourceSpec{Type: st, Name: src, URL: sourceURL, Revision: sourceRevision},
@@ -429,6 +437,10 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 		"Deploy the in-cluster Grafana server (grafana-operator) with the local Prometheus datasource. Collection is always on; this adds visualization.")
 	f.BoolVar(&metricsRemote, "metrics-remote", false,
 		"Deploy a secondary in-cluster Prometheus receiver and forward metrics to it (a remote/Grafana-Cloud stand-in for measuring active series + DPM).")
+	f.BoolVar(&grafanaCloud, "grafana-cloud", false,
+		"Forward a curated metrics subset to Grafana Cloud (needs the GRAFANA_CLOUD_ACCESS_{URL,USER,TOKEN} bws secrets). The real remote; not for preview.")
+	f.StringVar(&env, "env", "prod",
+		"Deployment environment label (${env}) applied to metrics sent to a shared remote stack, alongside the cluster name.")
 	f.StringVar(&bwToken, "bitwarden-token", "", "Bitwarden machine-account token for the ESO secret-zero (default $BWS_ACCESS_TOKEN).")
 	f.StringVar(&bwProjectID, "bitwarden-project-id", "", "Bitwarden project ID for the ClusterSecretStore (default $BWS_PROJECT_ID).")
 	f.StringVar(&bwOrgID, "bitwarden-org-id", "", "Bitwarden organization ID for the ClusterSecretStore (default $BWS_ORGANIZATION_ID).")

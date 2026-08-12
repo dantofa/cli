@@ -1,0 +1,11 @@
+---
+# The opt-in Grafana Cloud metrics destination, reconciled by the `grafana-cloud`
+# root that `dctl … cluster bootstrap --grafana-cloud` applies (path:
+# ./flux/grafana-cloud). The real remote counterpart to the in-cluster
+# metrics-remote stand-in. The root substitutes cluster-vars (${cluster_name},
+# ${env}) into the destination's external labels.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - external-secret.yaml
+  - destination-configmap.yaml
