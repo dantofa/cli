@@ -13,7 +13,13 @@ metadata:
   name: k8s-monitoring
   namespace: monitoring
 spec:
-  interval: 10m
+  # Short reconcile interval: part of this release's values come from opt-in
+  # destination ConfigMaps (metrics-remote / grafana-cloud) that other roots supply
+  # via the optional valuesFrom above. Flux watches those sources, but a newly
+  # created optional ConfigMap can appear just after the HR last rendered; a 2m
+  # interval bounds how long a freshly-enabled remote destination takes to reach
+  # Alloy, without waiting for the default 10m or a manual reconcile.
+  interval: 2m
   chart:
     spec:
       chart: k8s-monitoring
