@@ -52,7 +52,7 @@ caller choices. `core` builds a **neutral spec** with the invariants baked in;
 the `clients` adapter mechanically maps that spec to the `godo` request type
 (keeping godo out of `core` and the invariants impossible to bypass from any
 adapter). Do not "tidy" these into pass-through builders: if a caller ever
-legitimately needs to *not* enforce an invariant, add a parameter deliberately.
+legitimately needs to _not_ enforce an invariant, add a parameter deliberately.
 
 ## GitOps tree (`flux/`)
 
@@ -114,8 +114,8 @@ Dependencies are split by purpose:
   `go mod tidy`. Analyzer tools that are part of the project (e.g. `deadcode`)
   are pinned via the go.mod **`tool` directive** and run with `go tool`.
 
-Rule of thumb: *if it's the environment/toolchain, it's a flake dev-shell
-package; if it's a Go dependency of the code, it's in `go.mod`.*
+Rule of thumb: _if it's the environment/toolchain, it's a flake dev-shell
+package; if it's a Go dependency of the code, it's in `go.mod`._
 
 ## Commands — always via `just`
 
@@ -148,6 +148,7 @@ base accepted-CVE list as `packages.trivyignore-base`), so a downstream repo
 materializes and `import`s it, rev-pinned via its `flake.lock`.
 
 Two rules keep it portable:
+
 - **Config via env with defaults, never `just` interpolation in bodies.** Recipes
   read `${DCTL:-nix run github:dantofa/platform#default --}`, `${BASE_DOMAIN:-…}`,
   `${TRIVYIGNORE_BASE:-…}` etc. as bash (so `just shellcheck` still lints them; a
@@ -179,7 +180,7 @@ only tracks its own app-image CVEs.
   for secret injection. `nix.yml` builds the packaged artifact and asserts the
   version is stamped.
 - **CI forces plain (uncolored) output** via `env: { FORCE_COLOR: "", NO_COLOR:
-  "1" }` — `FORCE_COLOR` must be **empty** (any non-empty value, even `"0"`,
+"1" }` — `FORCE_COLOR` must be **empty** (any non-empty value, even `"0"`,
   forces color and overrides `NO_COLOR`).
 - **Dependency updates come from Renovate** (the hosted Mend app, config in
   `.github/renovate.json5`) — the single automated path, replacing Dependabot and
@@ -197,7 +198,7 @@ only tracks its own app-image CVEs.
   pushes don't re-trigger workflows. Run `just vendor-hash` by hand only for a
   non-Renovate `go.sum` change.
 - **`just update` is the manual path for what Renovate does not own**: `go get -u
-  ./…` + `go mod tidy`, then `nix flake update` (the flake tracks `nixos-unstable`,
+./…` + `go mod tidy`, then `nix flake update` (the flake tracks `nixos-unstable`,
   a rolling branch with no versions to PR, so it stays manual). It runs
   `just vendor-hash` at the end, so the `vendorHash` is recomputed automatically.
 - **GitHub Actions are pinned to full commit SHAs** with a `# vX.Y.Z` version
