@@ -1,0 +1,40 @@
+---
+# Adds a Grafana Cloud remote_write destination to the always-on k8s-monitoring
+# Alloy: the base HelmRelease references this ConfigMap via an optional valuesFrom,
+# so it deep-merges alongside the built-in localPrometheus destination. url +
+# basic-auth come from the ESO-materialized grafana-cloud-access Secret
+# (secret.create: false), so nothing sensitive is in git. The same curated denylist
+# as the test stand-in keeps the billed active series down, and cluster/env external
+# labels let one Grafana Cloud stack tell clusters apart.
+#
+# The destination key `grafana-cloud` maps to the Alloy secret component
+# `remote.kubernetes.secret.grafana_cloud` (hyphens become underscores), which
+# urlFrom references.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-monitoring-grafana-cloud
+  namespace: monitoring
+data:
+  values.yaml: |
+    destinations:
+      grafana-cloud:
+        type: prometheus
+        urlFrom: convert.nonsensitive(remote.kubernetes.secret.grafana_cloud.data["url"])
+        auth:
+          type: basic
+          usernameKey: username
+          passwordKey: password
+        secret:
+          create: false
+          name: grafana-cloud-access
+          namespace: monitoring
+        extraLabels:
+          cluster: ${cluster_name}
+          env: ${env}
+        metricProcessingRules: |
+          write_relabel_config {
+            source_labels = ["__name__"]
+            regex = "kube_pod_status_reason|kubelet_.+_bucket|apiserver_.+_bucket"
+            action = "drop"
+          }

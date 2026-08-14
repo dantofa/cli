@@ -1,0 +1,12 @@
+---
+# The opt-in remote metrics destination, reconciled by the `metrics-remote` root
+# that `dctl … cluster bootstrap --metrics-remote` applies (path:
+# ./flux/test/prometheus). A TEST/measurement fixture: an in-cluster secondary
+# Prometheus standing in for a real remote (Grafana Cloud) on preview + local, so
+# active series + DPM are measurable without a cloud account. The root substitutes
+# cluster-vars (${storage_class}, ${cluster_name}) into these manifests.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - prometheus-remote.yaml
+  - destination-configmap.yaml

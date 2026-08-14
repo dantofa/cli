@@ -1,15 +1,15 @@
 ---
-# Local Prometheus (server-only) — the always-on base store and Alloy's
-# remote_write destination #1. The prometheus-community chart bundles a whole
-# stack; everything except the server is disabled here (Alloy provides
-# node-exporter + kube-state-metrics; no Alertmanager/pushgateway yet). The server
-# runs as a pure receiver: web.enable-remote-write-receiver on, scrape_configs
-# emptied (Alloy scrapes). Short retention keeps it cheap on every cluster,
-# including ephemeral preview/local; PVC uses ${storage_class}.
+# Secondary Prometheus — a remote / Grafana-Cloud STAND-IN, deployed only with
+# --metrics-remote (preview + local). Alloy's destination #2 remote_writes here so
+# we can measure the active series + DPM a remote backend would bill, with no cloud
+# account. Same pure-receiver config as the base store (default scrape jobs off,
+# remote-write-receiver on). Reuses the prometheus-community HelmRepository the
+# base prometheus stack registers in this namespace. ${storage_class} is
+# substituted by the metrics-remote root.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: prometheus
+  name: prometheus-remote
   namespace: monitoring
 spec:
   interval: 10m
@@ -30,7 +30,6 @@ spec:
     remediation:
       retries: 3
   values:
-    # Subcharts off — this is a store only; Alloy owns collection.
     alertmanager:
       enabled: false
     kube-state-metrics:
@@ -54,13 +53,12 @@ spec:
           memory: 256Mi
         limits:
           memory: 512Mi
-    # Pure receiver: Alloy (k8s-monitoring) does all scraping and remote_writes
-    # here, so disable every default scrape job the chart would generate (v29
-    # builds prometheus.yml's scrape_configs from this map, not from serverFiles).
+    # Pure receiver: it only stores what Alloy remote_writes; disable every
+    # default scrape job the chart would otherwise generate.
     scrapeConfigs:
-      # Keep the self-scrape (localhost:9090) so the store self-monitors — its own
-      # tsdb head series + samples-appended metrics are how we measure active
-      # series and DPM (what a remote/Grafana Cloud backend would bill).
+      # Self-scrape (localhost:9090) so this receiver self-monitors: its tsdb head
+      # series + samples-appended metrics are how we measure the active series and
+      # DPM a remote / Grafana Cloud backend would bill for this destination.
       prometheus:
         enabled: true
       kubernetes-api-servers:

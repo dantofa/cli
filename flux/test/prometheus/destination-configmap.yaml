@@ -1,0 +1,34 @@
+---
+# Supplies a SECOND remote_write destination to the always-on k8s-monitoring
+# Alloy: the base HelmRelease references this ConfigMap via an optional valuesFrom,
+# so it deep-merges alongside the built-in localPrometheus destination (both
+# receive the scraped metrics). Points at the secondary Prometheus receiver in this
+# same root and tags metrics with the `cluster` external label — the mechanism a
+# shared remote/Grafana Cloud stack uses to tell clusters apart.
+#
+# metricProcessingRules is a per-destination write_relabel that curates what this
+# (remote/billed) destination receives WITHOUT touching the full-fidelity local
+# store. This is a conservative starter denylist — it drops the highest-cardinality
+# noise the secondary's seriesCountByMetricName surfaced (all-zero status reasons +
+# kubelet/apiserver histogram buckets) rather than a strict allowlist, so it is
+# safe before Stage 4 dashboards exist. Tune it against the measured active series
+# / DPM; once dashboards pin what is actually queried, tighten to a keep-list.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-monitoring-remote-destination
+  namespace: monitoring
+data:
+  values.yaml: |
+    destinations:
+      remote:
+        type: prometheus
+        url: http://prometheus-remote-server.monitoring.svc.cluster.local:80/api/v1/write
+        extraLabels:
+          cluster: ${cluster_name}
+        metricProcessingRules: |
+          write_relabel_config {
+            source_labels = ["__name__"]
+            regex = "kube_pod_status_reason|kubelet_.+_bucket|apiserver_.+_bucket"
+            action = "drop"
+          }

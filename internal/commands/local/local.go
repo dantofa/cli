@@ -96,6 +96,9 @@ func newLocalBootstrapCmd() *cobra.Command {
 		sourceName, baseDomain                       string
 		bwToken, bwProjectID, bwOrgID                string
 		monitoring                                   bool
+		metricsRemote                                bool
+		grafanaCloud                                 bool
+		env                                          string
 	)
 	cmd := &cobra.Command{
 		Use:   "bootstrap [name]",
@@ -202,6 +205,17 @@ func newLocalBootstrapCmd() *cobra.Command {
 			if monitoring {
 				roots = append(roots, fluxcore.MonitoringReconcileRoot())
 			}
+			// Opt-in remote metrics destination: a secondary in-cluster Prometheus
+			// receiver + a second Alloy remote_write destination (a GC/remote
+			// stand-in for measuring active series + DPM locally).
+			if metricsRemote {
+				roots = append(roots, fluxcore.MetricsRemoteReconcileRoot())
+			}
+			// Opt-in Grafana Cloud metrics destination (the real remote; needs the
+			// GRAFANA_CLOUD_ACCESS_* bws secrets). Independent of --metrics-remote.
+			if grafanaCloud {
+				roots = append(roots, fluxcore.GrafanaCloudReconcileRoot())
+			}
 			dnsZone, err := fluxcore.DNSZone(baseDomain)
 			if err != nil {
 				return render.Fail(err)
@@ -213,6 +227,7 @@ func newLocalBootstrapCmd() *cobra.Command {
 				fluxcore.VarBitwardenProjectID: bwProjectID,
 				fluxcore.VarDNSZone:            dnsZone,
 				fluxcore.VarStorageClass:       fluxcore.StorageClassLocal,
+				fluxcore.VarEnv:                env,
 			}
 			res, err := fluxcore.Bootstrap(ctx, fluxclient.New(kubePath), kc, fluxVersion,
 				fluxcore.SourceSpec{
@@ -239,7 +254,13 @@ func newLocalBootstrapCmd() *cobra.Command {
 	f.StringVar(&sourceName, "source-name", fluxcore.DefaultSourceName, "Name of the Flux OCIRepository the roots pull from.")
 	f.StringVar(&baseDomain, "base-domain", "", "Cluster ingress FQDN (${base_domain} in cluster-vars). Required; for local, a wildcard-DNS value like 127.0.0.1.nip.io resolves to localhost.")
 	f.BoolVar(&monitoring, "monitoring", false,
-		"Deploy the observability stack (kube-prometheus-stack + Alloy). Heavy; off by default.")
+		"Deploy the in-cluster Grafana server (grafana-operator) with the local Prometheus datasource. Collection is always on; this adds visualization.")
+	f.BoolVar(&metricsRemote, "metrics-remote", false,
+		"Deploy a secondary in-cluster Prometheus receiver and forward metrics to it (a remote/Grafana-Cloud stand-in for measuring active series + DPM).")
+	f.BoolVar(&grafanaCloud, "grafana-cloud", false,
+		"Forward a curated metrics subset to Grafana Cloud (needs the GRAFANA_CLOUD_ACCESS_{URL,USER,TOKEN} bws secrets). The real remote; not for preview.")
+	f.StringVar(&env, "env", "local",
+		"Deployment environment label (${env}) applied to metrics sent to a shared remote stack, alongside the cluster name.")
 	_ = cmd.MarkFlagRequired("base-domain")
 	f.StringVar(&bwToken, "bitwarden-token", "", "Bitwarden machine-account token for the ESO secret-zero (default $BWS_ACCESS_TOKEN).")
 	f.StringVar(&bwProjectID, "bitwarden-project-id", "", "Bitwarden project ID for the ClusterSecretStore (default $BWS_PROJECT_ID).")
