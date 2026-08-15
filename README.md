@@ -9,7 +9,7 @@ It deploys a fixed platform toolset via Flux:
 - **Metrics collection (all clusters):** Grafana Alloy + node-exporter + kube-state-metrics (k8s-monitoring) and the prometheus-operator CRDs, scraping to an always-on local Prometheus store (short retention).
 - **DOKS:** Cloudflare Tunnel controller by default (outbound-only, no LoadBalancer); with `--dolb`, Traefik + external-dns behind a DO LoadBalancer instead.
 - **kind (local):** Cloudflare Tunnel controller, SeaweedFS.
-- **With `--monitoring`:** an in-cluster Grafana (grafana-operator) with the local Prometheus as its datasource, served at `/grafana`.
+- **With `--monitoring`:** an in-cluster Grafana (grafana-operator) with the local Prometheus as its datasource, served at `/grafana`, including a per-cluster cost dashboard (compute/storage/LoadBalancer/estimated-traffic spend, priced from the DO Sizes API at bootstrap).
 
 ## Install
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"time"
 
@@ -229,6 +230,10 @@ func newLocalBootstrapCmd() *cobra.Command {
 				fluxcore.VarStorageClass:       fluxcore.StorageClassLocal,
 				fluxcore.VarEnv:                env,
 			}
+			// kind has no cloud cost, so the cost dashboard's price constants are all
+			// zero — the ${...} keys still exist so substitution stays valid and the
+			// cost panels simply read 0.
+			maps.Copy(vars, fluxcore.CostVars(0, 0, 0, 0))
 			res, err := fluxcore.Bootstrap(ctx, fluxclient.New(kubePath), kc, fluxVersion,
 				fluxcore.SourceSpec{
 					Type: fluxcore.SourceOCI, Name: sourceName, URL: url, Revision: tag, Insecure: true,

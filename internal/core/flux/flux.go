@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -168,6 +169,16 @@ const (
 	// stack can tell clusters apart alongside ${cluster_name}. Set from --env.
 	VarEnv = "env"
 
+	// Per-cluster cost constants the cost dashboard multiplies the always-collected
+	// metrics by (node count, PV bytes, LB count, egress). dctl writes them at
+	// bootstrap: compute + transfer from the DO Sizes API for the cluster's worker
+	// size, storage + LB from DO's fixed published rates. On kind they default to 0
+	// (no cloud cost) — see DefaultCostVars.
+	VarNodeHourlyPrice       = "node_hourly_price"        // one node's $/hour
+	VarNodeTransferGiB       = "node_transfer_gib"        // one node's included monthly transfer, GiB
+	VarBlockStorageGiBHourly = "block_storage_gib_hourly" // $/GiB-hour for a PersistentVolume
+	VarLBHourlyPrice         = "lb_hourly_price"          // $/hour per LoadBalancer Service
+
 	// clusterVarsNamespace is where the ConfigMap and reconcile roots live.
 	clusterVarsNamespace = "flux-system"
 
@@ -301,6 +312,21 @@ func ACMEServerURL(issuer string) string {
 		return ACMEServerStaging
 	default:
 		return ""
+	}
+}
+
+// CostVars formats the per-cluster cost constants into cluster-vars entries the
+// cost dashboard's PromQL substitutes (${node_hourly_price} etc.). Kept here with
+// the var keys so the DOKS and kind bootstraps produce identical entries; kind
+// passes zeros (no cloud cost). 'f' formatting avoids scientific notation, which
+// PromQL number literals reject.
+func CostVars(nodeHourlyUSD, nodeTransferGiB, blockStorageGiBHourlyUSD, lbHourlyUSD float64) map[string]string {
+	f := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+	return map[string]string{
+		VarNodeHourlyPrice:       f(nodeHourlyUSD),
+		VarNodeTransferGiB:       f(nodeTransferGiB),
+		VarBlockStorageGiBHourly: f(blockStorageGiBHourlyUSD),
+		VarLBHourlyPrice:         f(lbHourlyUSD),
 	}
 }
 

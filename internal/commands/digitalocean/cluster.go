@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"time"
 
@@ -368,6 +369,21 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 				fluxcore.VarStorageClass:       fluxcore.StorageClassDOKS,
 				fluxcore.VarEnv:                env,
 			}
+			// Per-cluster cost constants for the cost dashboard: price the cluster's
+			// worker size from the DO Sizes API (compute + included transfer); storage
+			// and LB come from DO's fixed rates. A pricing failure must not fail
+			// bootstrap — warn and fall through with zeros so the dashboard's ${...}
+			// substitution stays valid (cost panels read 0 until the next bootstrap).
+			costModel, cerr := docore.ClusterCostModel(ctx, cc, cluster)
+			if cerr != nil {
+				fmt.Fprintf(os.Stderr,
+					"warning: pricing cluster %q for the cost dashboard: %v (cost panels will read 0)\n",
+					cluster, cerr)
+			}
+			maps.Copy(vars, fluxcore.CostVars(
+				costModel.NodeHourlyUSD, costModel.NodeTransferGiB,
+				costModel.BlockStorageGiBHourlyUSD, costModel.LoadBalancerHourlyUSD,
+			))
 			// Ingress layer. The default is the Cloudflare Tunnel controller
 			// (outbound, no DO LoadBalancer — the bulk of the cluster's cost),
 			// exactly as on kind; --dolb selects the LoadBalancer path instead

@@ -145,6 +145,33 @@ func (c *ClusterClient) GetKubeconfig(ctx context.Context, id string) (string, e
 	return string(cfg.KubeconfigYAML), nil
 }
 
+// GetSize returns the neutral Size for a droplet slug, following pagination. It
+// backs the per-cluster cost model (node price + included transfer); the godo
+// Size type is mapped to core.Size here so it never leaks out of the adapter.
+func (c *ClusterClient) GetSize(ctx context.Context, slug string) (core.Size, error) {
+	opts := &godo.ListOptions{Page: 1, PerPage: perPage}
+	for {
+		sizes, resp, err := c.godo.Sizes.List(ctx, opts)
+		if err != nil {
+			return core.Size{}, apiError(err)
+		}
+		for _, s := range sizes {
+			if s.Slug == slug {
+				return core.Size{Slug: s.Slug, PriceHourly: s.PriceHourly, TransferTB: s.Transfer}, nil
+			}
+		}
+		if resp == nil || resp.Links == nil || resp.Links.IsLastPage() {
+			break
+		}
+		next, err := resp.Links.CurrentPage()
+		if err != nil {
+			return core.Size{}, err
+		}
+		opts.Page = next + 1
+	}
+	return core.Size{}, &core.SizeNotFoundError{Slug: slug}
+}
+
 func toCoreCluster(cl *godo.KubernetesCluster) core.Cluster {
 	if cl == nil {
 		return core.Cluster{}

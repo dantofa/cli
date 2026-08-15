@@ -10,7 +10,7 @@
   - [DONE] Grafana Operator as a base cluster stack (operator + CRDs only) (#31).
   - [DONE] Move monitoring agents from `prometheus-operator-crds` to `k8s-monitoring`
   - [DONE] Add Grafana Cloud support as an opt-in remote destination
-  - Add OpenCost to base cluster components for Grafana cost monitoring of DOKS cluster
+  - [DONE] Add a per-cluster cost dashboard in Grafana Cloud
   - Add Loki to base monitoring agents
   - Add Tempo to base monitoring agents
   - Add baseline set of `GrafanaDashboard` crds per cluster (node/kube/KSM, imported by grafana.com ID) with teardown
