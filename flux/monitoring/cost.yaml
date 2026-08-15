@@ -1,0 +1,27 @@
+---
+# The per-cluster cost dashboard (a grafana-operator GrafanaDashboard). dependsOn
+# grafana so the Grafana instance + Prometheus datasource (referenced by the fixed
+# `dantofa-prometheus` UID) exist first. Its postBuild.substituteFrom cluster-vars
+# fills the price constants (${node_hourly_price}, ${node_transfer_gib},
+# ${block_storage_gib_hourly}, ${lb_hourly_price}) dctl wrote at bootstrap into the
+# dashboard's PromQL; the monitoring root fills ${source_kind}/${source_name} here.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cost
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./flux/monitoring/cost
+  prune: true
+  wait: true
+  dependsOn:
+    - name: grafana
+  sourceRef:
+    kind: ${source_kind}
+    name: ${source_name}
+    namespace: flux-system
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

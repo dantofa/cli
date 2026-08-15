@@ -1,5 +1,8 @@
 .kubeconfig
 
+# Claude
+.claude/
+
 # Go
 /dist/
 *.out

@@ -8,3 +8,4 @@ kind: Kustomization
 resources:
   - config.yaml
   - grafana.yaml
+  - cost.yaml

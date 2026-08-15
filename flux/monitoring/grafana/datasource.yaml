@@ -14,6 +14,10 @@ spec:
       dashboards: dantofa
   datasource:
     name: Prometheus
+    # Stable UID so GrafanaDashboard CRs can bind their panels to this datasource
+    # by UID (the cost dashboard does) without an exported ${DS_*} input — which a
+    # Flux postBuild.substitute would otherwise clobber to empty.
+    uid: dantofa-prometheus
     type: prometheus
     access: proxy
     url: http://prometheus-server.monitoring.svc.cluster.local:80
