@@ -96,7 +96,6 @@ func newLocalBootstrapCmd() *cobra.Command {
 		fluxVersion, registryName, artifactName, tag string
 		sourceName, baseDomain                       string
 		bwToken, bwProjectID, bwOrgID                string
-		monitoring                                   bool
 		metricsRemote                                bool
 		grafanaCloud                                 bool
 		env                                          string
@@ -201,11 +200,6 @@ func newLocalBootstrapCmd() *cobra.Command {
 					Substitute: true,
 				},
 			}
-			// The opt-in observability stack (heavy); enable on a workstation kind
-			// cluster that has the headroom.
-			if monitoring {
-				roots = append(roots, fluxcore.MonitoringReconcileRoot())
-			}
 			// Opt-in remote metrics destination: a secondary in-cluster Prometheus
 			// receiver + a second Alloy remote_write destination (a GC/remote
 			// stand-in for measuring active series + DPM locally).
@@ -258,8 +252,6 @@ func newLocalBootstrapCmd() *cobra.Command {
 	f.StringVarP(&tag, "tag", "t", localcore.DefaultArtifactTag, "OCI tag to track.")
 	f.StringVar(&sourceName, "source-name", fluxcore.DefaultSourceName, "Name of the Flux OCIRepository the roots pull from.")
 	f.StringVar(&baseDomain, "base-domain", "", "Cluster ingress FQDN (${base_domain} in cluster-vars). Required; for local, a wildcard-DNS value like 127.0.0.1.nip.io resolves to localhost.")
-	f.BoolVar(&monitoring, "monitoring", false,
-		"Deploy the in-cluster Grafana server (grafana-operator) with the local Prometheus datasource. Collection is always on; this adds visualization.")
 	f.BoolVar(&metricsRemote, "metrics-remote", false,
 		"Deploy a secondary in-cluster Prometheus receiver and forward metrics to it (a remote/Grafana-Cloud stand-in for measuring active series + DPM).")
 	f.BoolVar(&grafanaCloud, "grafana-cloud", false,
