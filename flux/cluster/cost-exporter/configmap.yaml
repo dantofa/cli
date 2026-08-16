@@ -1,0 +1,28 @@
+---
+# The per-cluster price constants as a Prometheus exposition file. dctl computed
+# them at bootstrap — node hourly price + included transfer from the DO Sizes API,
+# block-storage and LoadBalancer from DO's fixed rates — and wrote them into
+# cluster-vars, which the cost-exporter Kustomization substitutes here. The exporter
+# Deployment serves this at /metrics; Alloy's annotation autodiscovery scrapes it and
+# attaches the cluster/env labels, so the prices land in local Prometheus and any
+# remote (Grafana Cloud) destination as `dantofa_*` series a central cost dashboard
+# joins on `cluster`. On kind every value is 0 (no cloud cost).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cost-prices
+  namespace: monitoring
+data:
+  metrics: |
+    # HELP dantofa_node_hourly_price_usd Hourly USD price of one worker node (DO Sizes API).
+    # TYPE dantofa_node_hourly_price_usd gauge
+    dantofa_node_hourly_price_usd ${node_hourly_price}
+    # HELP dantofa_node_transfer_gib Included monthly outbound transfer per node, GiB (DO Sizes API).
+    # TYPE dantofa_node_transfer_gib gauge
+    dantofa_node_transfer_gib ${node_transfer_gib}
+    # HELP dantofa_block_storage_gib_hourly_usd Hourly USD price per GiB of block storage (PersistentVolumes).
+    # TYPE dantofa_block_storage_gib_hourly_usd gauge
+    dantofa_block_storage_gib_hourly_usd ${block_storage_gib_hourly}
+    # HELP dantofa_lb_hourly_price_usd Hourly USD price per DOKS LoadBalancer Service.
+    # TYPE dantofa_lb_hourly_price_usd gauge
+    dantofa_lb_hourly_price_usd ${lb_hourly_price}

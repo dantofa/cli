@@ -1,0 +1,56 @@
+---
+# Serves the cost-prices ConfigMap at :8080/metrics for Alloy's annotation
+# autodiscovery (k8s.grafana.com/scrape). nginx-unprivileged runs non-root (uid 101)
+# on an unprivileged port with the ConfigMap mounted read-only as its web root, so a
+# GET /metrics returns the price exposition. Restricted-PSS compliant so it clears
+# Kyverno. Single replica: the join in the dashboard tolerates one series per cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cost-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: cost-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cost-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cost-exporter
+      annotations:
+        k8s.grafana.com/scrape: "true"
+        k8s.grafana.com/metrics.portNumber: "8080"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: nginxinc/nginx-unprivileged:1.27.3-alpine
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 101
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+          volumeMounts:
+            - name: metrics
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+      volumes:
+        - name: metrics
+          configMap:
+            name: cost-prices

@@ -31,5 +31,13 @@
       matchStrings: ["image:\\s*(?<depName>[^:\\s]+):(?<currentValue>\\S+)"],
       datasourceTemplate: "docker",
     },
+    // The cost-exporter is a plain Deployment, so its image is not a HelmRelease
+    // value the flux manager sees — match it explicitly.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/flux/cluster/cost-exporter/deployment\\.yaml$/"],
+      matchStrings: ["image:\\s*(?<depName>[^:\\s]+):(?<currentValue>\\S+)"],
+      datasourceTemplate: "docker",
+    },
   ],
 }

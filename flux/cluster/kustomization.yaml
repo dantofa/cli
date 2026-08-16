@@ -19,3 +19,4 @@ resources:
   - prometheus-operator-crds.yaml
   - prometheus.yaml
   - k8s-monitoring.yaml
+  - cost-exporter.yaml
