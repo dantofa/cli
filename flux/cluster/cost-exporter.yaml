@@ -1,0 +1,28 @@
+---
+# The cost price exporter — a shared base stack the `cluster` reconcile root loads on
+# every cluster. It serves the per-cluster price constants (dctl wrote them into
+# cluster-vars from the DO Sizes API at bootstrap) as `dantofa_*` metrics that Alloy
+# scrapes, so a central Grafana Cloud cost dashboard can join them on `cluster`.
+# dependsOn prometheus for the `monitoring` namespace; postBuild.substituteFrom
+# cluster-vars resolves the ${node_hourly_price}/... price tokens (all 0 on kind).
+# Source-agnostic sourceRef, filled by the root's substitution.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cost-exporter
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./flux/cluster/cost-exporter
+  prune: true
+  wait: true
+  dependsOn:
+    - name: prometheus
+  sourceRef:
+    kind: ${source_kind}
+    name: ${source_name}
+    namespace: flux-system
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

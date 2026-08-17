@@ -267,7 +267,6 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 		namespace, secretName, configMapName  string
 		tlsIssuer                             string
 		env                                   string
-		monitoring                            bool
 		metricsRemote                         bool
 		grafanaCloud                          bool
 		dolb                                  bool
@@ -401,11 +400,6 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 				{Name: fluxcore.ClusterRootName, Path: sourcePath, Substitute: true},
 			}
 			roots = append(roots, fluxcore.DOKSIngressRoots(dolb, tlsIssuer)...)
-			// The opt-in observability stack (heavy); off by default so preview and
-			// the base flows stay lean.
-			if monitoring {
-				roots = append(roots, fluxcore.MonitoringReconcileRoot())
-			}
 			// Opt-in remote metrics destination: a secondary in-cluster Prometheus
 			// receiver + a second Alloy remote_write destination (a GC/remote
 			// stand-in; on DOKS this is later repointed at Grafana Cloud).
@@ -449,8 +443,6 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 		`cert-manager ClusterIssuer for the Traefik default cert (only with --dolb): "selfsigned" (Cloudflare Full), "letsencrypt" (Full strict, DNS-01), or "staging" (Let's Encrypt staging CA, DNS-01).`)
 	f.BoolVar(&dolb, "dolb", false,
 		"Use a DO LoadBalancer ingress (Traefik + external-dns) instead of the default Cloudflare Tunnel. Adds LoadBalancer cost.")
-	f.BoolVar(&monitoring, "monitoring", false,
-		"Deploy the in-cluster Grafana server (grafana-operator) with the local Prometheus datasource. Collection is always on; this adds visualization.")
 	f.BoolVar(&metricsRemote, "metrics-remote", false,
 		"Deploy a secondary in-cluster Prometheus receiver and forward metrics to it (a remote/Grafana-Cloud stand-in for measuring active series + DPM).")
 	f.BoolVar(&grafanaCloud, "grafana-cloud", false,

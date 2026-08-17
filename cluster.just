@@ -204,7 +204,7 @@ cluster-verify-image-scan:
   echo "IMAGE SCAN GATE PASSED -- no unsuppressed CRITICAL vulnerabilities in platform images."
 
 # Create the kind cluster (1 control-plane + 2 workers), then bootstrap the platform
-# onto it. `*args` pass through to bootstrap (e.g. --monitoring). Uses $DCTL (default:
+# onto it. `*args` pass through to bootstrap (e.g. --grafana-cloud). Uses $DCTL (default:
 # `nix run github:dantofa/platform#default --`; the platform overrides it to
 # `go run ./cmd/dctl`).
 cluster-local-create *args:
@@ -217,7 +217,7 @@ cluster-local-create *args:
 
 # Bootstrap the platform (Flux + ingress + the shared stacks) onto an already-created
 # cluster — split from create so you can (re-)bootstrap without recreating, e.g. to
-# add --monitoring. Reads BWS_* for the ESO secret-zero (local needs no DO/Spaces
+# add --grafana-cloud. Reads BWS_* for the ESO secret-zero (local needs no DO/Spaces
 # creds); uses $DCTL and $BASE_DOMAIN.
 cluster-local-bootstrap *args:
   #!/usr/bin/env bash

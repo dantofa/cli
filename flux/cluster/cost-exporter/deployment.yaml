@@ -1,0 +1,60 @@
+---
+# Serves the cost-prices ConfigMap at :8080/metrics for Alloy's annotation
+# autodiscovery (k8s.grafana.com/scrape). busybox httpd (a single static binary, no
+# TLS/OpenSSL/libxml2 stack — so it clears the Trivy CRITICAL gate a full nginx does
+# not) serves the ConfigMap mounted read-only at /www; a GET /metrics returns the
+# price exposition (no Content-Type, so scrapers use the text-format parser).
+# Restricted-PSS compliant (non-root, read-only rootfs) so it clears Kyverno. Single
+# replica: the dashboard's price join tolerates one series per cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cost-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: cost-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cost-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cost-exporter
+      annotations:
+        k8s.grafana.com/scrape: "true"
+        k8s.grafana.com/metrics.portNumber: "8080"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: httpd
+          image: busybox:1.37.0-musl
+          command: ["httpd", "-f", "-p", "8080", "-h", "/www"]
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 65534
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+          volumeMounts:
+            - name: metrics
+              mountPath: /www
+              readOnly: true
+      volumes:
+        - name: metrics
+          configMap:
+            name: cost-prices

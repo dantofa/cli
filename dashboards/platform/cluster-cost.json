@@ -1,0 +1,404 @@
+{
+  "uid": "dantofa-cluster-cost",
+  "title": "Cluster cost (estimated)",
+  "tags": [
+    "dantofa",
+    "cost"
+  ],
+  "schemaVersion": 39,
+  "editable": true,
+  "refresh": "5m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "Data source",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "cluster",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "label": "Cluster",
+        "query": "label_values(kube_node_info, cluster)",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total (USD/mo)",
+      "description": "List-price estimate of monthly DO spend across the selected cluster(s). Not the DO invoice.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "noValue": "0",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "instant": true,
+          "expr": "(sum ((\n  label_replace(count by (cluster) (kube_node_info{cluster=~\"$cluster\"}) * on(cluster) group_left() max by (cluster) (dantofa_node_hourly_price_usd) * 730, \"c\", \"compute\", \"\", \"\")\n  or label_replace(sum by (cluster) (kube_persistentvolume_capacity_bytes{cluster=~\"$cluster\"}) / 1073741824 * on(cluster) group_left() max by (cluster) (dantofa_block_storage_gib_hourly_usd) * 730, \"c\", \"storage\", \"\", \"\")\n  or label_replace(count by (cluster) (kube_service_spec_type{cluster=~\"$cluster\", type=\"LoadBalancer\"}) * on(cluster) group_left() max by (cluster) (dantofa_lb_hourly_price_usd) * 730, \"c\", \"lb\", \"\", \"\")\n  or label_replace(clamp_min(sum by (cluster) (increase(node_network_transmit_bytes_total{cluster=~\"$cluster\", device=\"eth0\"}[30d])) / 1073741824 - count by (cluster) (kube_node_info{cluster=~\"$cluster\"}) * on(cluster) group_left() max by (cluster) (dantofa_node_transfer_gib), 0) * 0.01, \"c\", \"traffic\", \"\", \"\")\n))) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Compute (USD/mo)",
+      "description": "Node count x worker-size hourly price (DO Sizes API), summed over selected clusters.",
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 4,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "noValue": "0",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "instant": true,
+          "expr": "(sum (count by (cluster) (kube_node_info{cluster=~\"$cluster\"}) * on(cluster) group_left() max by (cluster) (dantofa_node_hourly_price_usd) * 730)) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Storage (USD/mo)",
+      "description": "Provisioned PersistentVolume bytes x DO block-storage rate.",
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 9,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "noValue": "0",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "instant": true,
+          "expr": "(sum (sum by (cluster) (kube_persistentvolume_capacity_bytes{cluster=~\"$cluster\"}) / 1073741824 * on(cluster) group_left() max by (cluster) (dantofa_block_storage_gib_hourly_usd) * 730)) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "LoadBalancers (USD/mo)",
+      "description": "type=LoadBalancer Service count x DOKS LB price.",
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 14,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "noValue": "0",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "instant": true,
+          "expr": "(sum (count by (cluster) (kube_service_spec_type{cluster=~\"$cluster\", type=\"LoadBalancer\"}) * on(cluster) group_left() max by (cluster) (dantofa_lb_hourly_price_usd) * 730)) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Traffic overage (USD/mo, est.)",
+      "description": "Upper-bound estimate: eth0 egress over 30d beyond the pooled per-node allowance, at $0.01/GiB.",
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 19,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "noValue": "0",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "instant": true,
+          "expr": "(sum (clamp_min(sum by (cluster) (increase(node_network_transmit_bytes_total{cluster=~\"$cluster\", device=\"eth0\"}[30d])) / 1073741824 - count by (cluster) (kube_node_info{cluster=~\"$cluster\"}) * on(cluster) group_left() max by (cluster) (dantofa_node_transfer_gib), 0) * 0.01)) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Monthly cost by cluster (USD, estimated)",
+      "description": "Per-cluster total, sortable \u2014 the cross-cluster single pane.",
+      "gridPos": {
+        "h": 9,
+        "w": 10,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "noValue": "0",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "USD/mo",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "instant": true,
+          "format": "table",
+          "expr": "sum by (cluster) ((\n  label_replace(count by (cluster) (kube_node_info{cluster=~\"$cluster\"}) * on(cluster) group_left() max by (cluster) (dantofa_node_hourly_price_usd) * 730, \"c\", \"compute\", \"\", \"\")\n  or label_replace(sum by (cluster) (kube_persistentvolume_capacity_bytes{cluster=~\"$cluster\"}) / 1073741824 * on(cluster) group_left() max by (cluster) (dantofa_block_storage_gib_hourly_usd) * 730, \"c\", \"storage\", \"\", \"\")\n  or label_replace(count by (cluster) (kube_service_spec_type{cluster=~\"$cluster\", type=\"LoadBalancer\"}) * on(cluster) group_left() max by (cluster) (dantofa_lb_hourly_price_usd) * 730, \"c\", \"lb\", \"\", \"\")\n  or label_replace(clamp_min(sum by (cluster) (increase(node_network_transmit_bytes_total{cluster=~\"$cluster\", device=\"eth0\"}[30d])) / 1073741824 - count by (cluster) (kube_node_info{cluster=~\"$cluster\"}) * on(cluster) group_left() max by (cluster) (dantofa_node_transfer_gib), 0) * 0.01, \"c\", \"traffic\", \"\", \"\")\n))"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "cluster": "Cluster",
+              "Value": "USD/mo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Monthly cost by component (USD/mo)",
+      "description": "Compute, storage and LoadBalancer monthly cost over time (summed over selected clusters), stacked.",
+      "gridPos": {
+        "h": 9,
+        "w": 14,
+        "x": 10,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "legendFormat": "Compute",
+          "expr": "sum (count by (cluster) (kube_node_info{cluster=~\"$cluster\"}) * on(cluster) group_left() max by (cluster) (dantofa_node_hourly_price_usd) * 730)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "legendFormat": "Storage",
+          "expr": "sum (sum by (cluster) (kube_persistentvolume_capacity_bytes{cluster=~\"$cluster\"}) / 1073741824 * on(cluster) group_left() max by (cluster) (dantofa_block_storage_gib_hourly_usd) * 730)"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "legendFormat": "LoadBalancers",
+          "expr": "sum (count by (cluster) (kube_service_spec_type{cluster=~\"$cluster\", type=\"LoadBalancer\"}) * on(cluster) group_left() max by (cluster) (dantofa_lb_hourly_price_usd) * 730)"
+        }
+      ]
+    }
+  ]
+}

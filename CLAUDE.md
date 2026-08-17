@@ -96,7 +96,9 @@ ClusterSecretStore. **Disposable, cluster-local secrets** (no external source of
 truth — e.g. a generated admin password) are minted **in-cluster** by an ESO
 `Password` generator (`generators.external-secrets.io`), consumed by an
 ExternalSecret via `dataFrom.sourceRef.generatorRef` — no bitwarden entry, no
-manual step (see `flux/monitoring/config`).
+manual step. (No stack currently uses this — it backed the in-cluster Grafana admin
+password, dropped when visualization moved to Grafana Cloud — but it stays documented
+as the sanctioned pattern for disposable secrets.)
 
 ## The two-tier tooling rule (important)
 
