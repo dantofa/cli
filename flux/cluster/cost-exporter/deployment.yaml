@@ -1,9 +1,11 @@
 ---
 # Serves the cost-prices ConfigMap at :8080/metrics for Alloy's annotation
-# autodiscovery (k8s.grafana.com/scrape). nginx-unprivileged runs non-root (uid 101)
-# on an unprivileged port with the ConfigMap mounted read-only as its web root, so a
-# GET /metrics returns the price exposition. Restricted-PSS compliant so it clears
-# Kyverno. Single replica: the join in the dashboard tolerates one series per cluster.
+# autodiscovery (k8s.grafana.com/scrape). busybox httpd (a single static binary, no
+# TLS/OpenSSL/libxml2 stack — so it clears the Trivy CRITICAL gate a full nginx does
+# not) serves the ConfigMap mounted read-only at /www; a GET /metrics returns the
+# price exposition (no Content-Type, so scrapers use the text-format parser).
+# Restricted-PSS compliant (non-root, read-only rootfs) so it clears Kyverno. Single
+# replica: the dashboard's price join tolerates one series per cluster.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,14 +31,16 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: nginx
-          image: nginxinc/nginx-unprivileged:1.27.3-alpine
+        - name: httpd
+          image: busybox:1.37.0-musl
+          command: ["httpd", "-f", "-p", "8080", "-h", "/www"]
           ports:
             - name: http
               containerPort: 8080
           securityContext:
             allowPrivilegeEscalation: false
-            runAsUser: 101
+            runAsUser: 65534
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
@@ -48,7 +52,7 @@ spec:
               memory: 32Mi
           volumeMounts:
             - name: metrics
-              mountPath: /usr/share/nginx/html
+              mountPath: /www
               readOnly: true
       volumes:
         - name: metrics
