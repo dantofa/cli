@@ -5,8 +5,11 @@
 # and short (24h) block retention keeps it cheap on every cluster; the PVC uses
 # ${storage_class}. Receivers are pared to OTLP only (grpc 4317 / http 4318) — the
 # chart's default jaeger/opencensus receivers are dropped. Runs non-root (the chart
-# defaults to uid/fsGroup 10001); we add seccomp + drop caps. Reuses the `grafana`
-# HelmRepository the k8s-monitoring stack registers (Flux retries until it exists).
+# defaults to uid/fsGroup 10001); we add seccomp + drop caps. Sourced from the
+# maintained OSS chart (grafana-community) — the first-party grafana/tempo chart is
+# enterprise-only as of 2026-03 and its frozen line ships CVE-bearing images. Reuses
+# the `grafana-community` HelmRepository the loki stack registers (Flux retries until
+# it exists).
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -18,10 +21,10 @@ spec:
     spec:
       chart: tempo
       # Exact pin; bumped by Renovate (flux manager).
-      version: "1.24.4"
+      version: "2.2.4"
       sourceRef:
         kind: HelmRepository
-        name: grafana
+        name: grafana-community
         namespace: monitoring
       interval: 10m
   install:
