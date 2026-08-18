@@ -5,9 +5,9 @@
 # every cluster (incl. ephemeral preview/local); the compactor prunes to
 # retention_period so the small PVC does not fill. Gateway/caches/canary/test are all
 # disabled — Alloy pushes straight to the `loki` service on :3100. PVC uses
-# ${storage_class}. Reuses the `grafana` HelmRepository the k8s-monitoring stack
-# registers (same chart repo, same namespace) rather than declaring a duplicate; Flux
-# retries the chart pull until that source exists.
+# ${storage_class}. Sourced from the maintained OSS chart (grafana-community, see
+# repository.yaml) — the same unified chart, but with patched images the frozen
+# first-party grafana/loki 6.x can no longer ship.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -18,12 +18,11 @@ spec:
   chart:
     spec:
       chart: loki
-      # Exact pin; bumped by Renovate (flux manager). 7.x is a major rev — it lands
-      # as a reviewed Renovate PR.
-      version: "6.55.0"
+      # Exact pin; bumped by Renovate (flux manager).
+      version: "18.9.0"
       sourceRef:
         kind: HelmRepository
-        name: grafana
+        name: grafana-community
         namespace: monitoring
       interval: 10m
   install:

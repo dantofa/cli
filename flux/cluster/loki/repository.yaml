@@ -1,0 +1,13 @@
+---
+# The maintained OSS Loki chart repo. As of 2026-03 the first-party grafana/loki chart
+# is Grafana-Enterprise-Logs only; the open-source chart (same unified chart, now
+# appVersion 3.7.x with the patched images the frozen grafana/loki 6.x lacked) moved
+# here. Own HelmRepository for this stack — no longer borrowing k8s-monitoring's.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: grafana-community
+  namespace: monitoring
+spec:
+  interval: 1h
+  url: https://grafana-community.github.io/helm-charts
