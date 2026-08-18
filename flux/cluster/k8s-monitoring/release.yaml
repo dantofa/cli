@@ -1,13 +1,15 @@
 ---
-# k8s-monitoring (v4): Alloy collectors for metrics and logs. alloy-metrics
+# k8s-monitoring (v4): Alloy collectors for metrics, logs, and traces. alloy-metrics
 # (StatefulSet) scrapes cluster + host + pod metrics and any ServiceMonitor/PodMonitor
 # objects and remote_writes to the local Prometheus; alloy-logs (DaemonSet) tails pod
-# logs and pushes them to the local Loki (podLogsViaLoki). It also deploys
-# node-exporter and kube-state-metrics (telemetryServices). Traces stay at their
-# disabled defaults until Tempo lands. Remote destinations (Grafana Cloud / remote
-# Prometheus) are added as opt-in extra destinations with their own allowlist +
-# cluster/env labels; a feature with no explicit destinations fans out to every
-# signal-compatible destination. cluster.name is substituted from ${cluster_name}.
+# logs and pushes them to the local Loki (podLogsViaLoki); alloy-receiver (Deployment)
+# receives OTLP from in-cluster apps and forwards traces to the local Tempo
+# (applicationObservability) — its OTLP metrics/logs fan out to Prometheus/Loki. It
+# also deploys node-exporter and kube-state-metrics (telemetryServices). Remote
+# destinations (Grafana Cloud / remote Prometheus) are added as opt-in extra
+# destinations with their own allowlist + cluster/env labels; a feature with no
+# explicit destinations fans out to every signal-compatible destination. cluster.name
+# is substituted from ${cluster_name}.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -53,9 +55,10 @@ spec:
   values:
     cluster:
       name: ${cluster_name}
-    # Always-on local destinations: the Prometheus remote-write receiver (metrics)
-    # and the Loki push endpoint (logs). url is the full push path, as the
-    # localPrometheus one is (the chart uses it verbatim).
+    # Always-on local destinations: Prometheus remote-write (metrics), Loki push
+    # (logs), and Tempo OTLP/gRPC (traces only — metrics/logs disabled so app OTLP
+    # metrics/logs route to Prometheus/Loki instead). protocolValidation off: the
+    # in-cluster Tempo service is a known-good endpoint.
     destinations:
       localPrometheus:
         type: prometheus
@@ -63,13 +66,27 @@ spec:
       localLoki:
         type: loki
         url: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+      localTempo:
+        type: otlp
+        url: http://tempo.monitoring.svc.cluster.local:4317
+        protocol: grpc
+        protocolValidation: false
+        metrics:
+          enabled: false
+        logs:
+          enabled: false
+        traces:
+          enabled: true
     # Collectors: alloy-metrics (clustered StatefulSet) scrapes/remote_writes metrics;
-    # alloy-logs (DaemonSet) reads node-local pod log files and pushes to Loki.
+    # alloy-logs (DaemonSet) reads node-local pod log files and pushes to Loki;
+    # alloy-receiver (Deployment) exposes the OTLP receiver for in-cluster apps.
     collectors:
       alloy-metrics:
         presets: [clustered, statefulset]
       alloy-logs:
         presets: [filesystem-log-reader, daemonset]
+      alloy-receiver:
+        presets: [deployment]
     # Deploy the exporters the metrics features scrape.
     telemetryServices:
       kube-state-metrics:
@@ -95,3 +112,16 @@ spec:
     podLogsViaLoki:
       enabled: true
       collector: alloy-logs
+    # Trace feature: receive OTLP (grpc 4317 + http 4318) from in-cluster apps on the
+    # alloy-receiver Deployment. No explicit destinations, so each signal fans out to
+    # its capable destination — traces to local Tempo (and Grafana Cloud when
+    # --grafana-cloud adds its otlp destination), app metrics/logs to Prometheus/Loki.
+    applicationObservability:
+      enabled: true
+      collector: alloy-receiver
+      receivers:
+        otlp:
+          grpc:
+            enabled: true
+          http:
+            enabled: true
