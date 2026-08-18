@@ -10,8 +10,8 @@
   - [DONE] Deploy local Prometheus agent
   - [DONE] Add Grafana Cloud support as an opt-in remote destination
   - [DONE] Add a cluster cost metrics to Prometheus
-  - Add log collector to base monitoring agents
-  - Add Otel collector to base monitoring agents
+  - Add log collection to base monitoring agents
+  - Add trace collection to base monitoring agents
 - [DONE] Add cost monitoring + budget alerts for DigitalOcean spend (clusters, LoadBalancers, Spaces); flag orphaned/leftover resources
 - [DONE] Validate the Let's Encrypt TLS path (`--tls-issuer letsencrypt` + Cloudflare DNS-01) against a real DOKS cluster — built but never run
   - [DONE] Add a staging issuer variant: `--tls-issuer staging` (Let's Encrypt staging ACME server, same Cloudflare DNS-01 solver) so preview and prod select the CA per cluster; production LE stays on prod only, and its rate limits stay off the preview path. Both ACME issuers share one reusable layer, split into two ordered reconcile roots — `cloudflare-api-token` (the Cloudflare DNS-01 token ExternalSecret) then `letsencrypt` (the ClusterIssuer, `dependsOn` the token so it never races an absent secret) — with the issuer name + ACME endpoint substituted per cluster via `${tls_issuer}`/`${acme_server}` cluster-vars.
