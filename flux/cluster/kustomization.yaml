@@ -17,5 +17,6 @@ resources:
   - trivy.yaml
   - prometheus-operator-crds.yaml
   - prometheus.yaml
+  - loki.yaml
   - k8s-monitoring.yaml
   - cost-exporter.yaml

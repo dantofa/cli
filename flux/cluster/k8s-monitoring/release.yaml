@@ -1,12 +1,13 @@
 ---
-# k8s-monitoring (v4): one Alloy metrics collector scrapes cluster + host + pod
-# metrics and any ServiceMonitor/PodMonitor objects, then remote_writes to the
-# local Prometheus (destination #1). It also deploys node-exporter and
-# kube-state-metrics (telemetryServices). Metrics-only for now — logs/traces stay
-# at their disabled defaults until a Loki/Tempo backend lands; a remote
-# destination (Grafana Cloud / remote Prometheus) is added later as destination
-# #2 with its own allowlist + cluster/env labels. cluster.name is substituted
-# from ${cluster_name}.
+# k8s-monitoring (v4): Alloy collectors for metrics and logs. alloy-metrics
+# (StatefulSet) scrapes cluster + host + pod metrics and any ServiceMonitor/PodMonitor
+# objects and remote_writes to the local Prometheus; alloy-logs (DaemonSet) tails pod
+# logs and pushes them to the local Loki (podLogsViaLoki). It also deploys
+# node-exporter and kube-state-metrics (telemetryServices). Traces stay at their
+# disabled defaults until Tempo lands. Remote destinations (Grafana Cloud / remote
+# Prometheus) are added as opt-in extra destinations with their own allowlist +
+# cluster/env labels; a feature with no explicit destinations fans out to every
+# signal-compatible destination. cluster.name is substituted from ${cluster_name}.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -52,22 +53,30 @@ spec:
   values:
     cluster:
       name: ${cluster_name}
-    # Destination #1: the always-on local Prometheus remote-write receiver.
+    # Always-on local destinations: the Prometheus remote-write receiver (metrics)
+    # and the Loki push endpoint (logs). url is the full push path, as the
+    # localPrometheus one is (the chart uses it verbatim).
     destinations:
       localPrometheus:
         type: prometheus
         url: http://prometheus-server.monitoring.svc.cluster.local:80/api/v1/write
-    # The single metrics collector every feature below runs on.
+      localLoki:
+        type: loki
+        url: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+    # Collectors: alloy-metrics (clustered StatefulSet) scrapes/remote_writes metrics;
+    # alloy-logs (DaemonSet) reads node-local pod log files and pushes to Loki.
     collectors:
       alloy-metrics:
         presets: [clustered, statefulset]
+      alloy-logs:
+        presets: [filesystem-log-reader, daemonset]
     # Deploy the exporters the metrics features scrape.
     telemetryServices:
       kube-state-metrics:
         deploy: true
       node-exporter:
         deploy: true
-    # Metrics features (logs/traces/events left at their disabled defaults).
+    # Metrics features (traces/events left at their disabled defaults).
     clusterMetrics:
       enabled: true
       collector: alloy-metrics
@@ -80,3 +89,9 @@ spec:
     annotationAutodiscovery:
       enabled: true
       collector: alloy-metrics
+    # Log feature: tail pod logs on the alloy-logs DaemonSet. No explicit
+    # destinations, so logs go to every logs-capable destination (local Loki now,
+    # Grafana Cloud too when --grafana-cloud adds its loki destination).
+    podLogsViaLoki:
+      enabled: true
+      collector: alloy-logs

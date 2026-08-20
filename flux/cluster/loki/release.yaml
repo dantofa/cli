@@ -1,0 +1,86 @@
+---
+# Local Loki (SingleBinary) — the always-on base log store and the k8s-monitoring
+# Alloy log destination, mirroring the local Prometheus store for metrics. Monolithic
+# single-binary mode with filesystem storage and short retention keeps it cheap on
+# every cluster (incl. ephemeral preview/local); the compactor prunes to
+# retention_period so the small PVC does not fill. Gateway/caches/canary/test are all
+# disabled — Alloy pushes straight to the `loki` service on :3100. PVC uses
+# ${storage_class}. Sourced from the maintained OSS chart (grafana-community, see
+# repository.yaml) — the same unified chart, but with patched images the frozen
+# first-party grafana/loki 6.x can no longer ship.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: loki
+      # Exact pin; bumped by Renovate (flux manager).
+      version: "18.9.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana-community
+        namespace: monitoring
+      interval: 10m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    deploymentMode: SingleBinary
+    loki:
+      auth_enabled: false
+      commonConfig:
+        replication_factor: 1
+      storage:
+        type: filesystem
+      schemaConfig:
+        configs:
+          - from: "2024-04-01"
+            store: tsdb
+            object_store: filesystem
+            schema: v13
+            index:
+              prefix: index_
+              period: 24h
+      limits_config:
+        retention_period: 72h
+      compactor:
+        retention_enabled: true
+        delete_request_store: filesystem
+    singleBinary:
+      replicas: 1
+      persistence:
+        enabled: true
+        storageClass: ${storage_class}
+        size: 5Gi
+      resources:
+        requests:
+          cpu: 100m
+          memory: 192Mi
+        limits:
+          memory: 512Mi
+    # SingleBinary only — disable the scalable-mode components and the extras.
+    backend:
+      replicas: 0
+    read:
+      replicas: 0
+    write:
+      replicas: 0
+    chunksCache:
+      enabled: false
+    resultsCache:
+      enabled: false
+    lokiCanary:
+      enabled: false
+    test:
+      enabled: false
+    gateway:
+      enabled: false
+    minio:
+      enabled: false
