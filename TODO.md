@@ -19,14 +19,11 @@
 ## Downstream projects
 
 - Add Saas repository with initial agent framework. Interesting features:
-  -- Dev+Ops of RAG apps (ISO chatbot)
   -- Dev+Ops of Cloudflare workers/pages web apps
+  -- Dev+Ops of Cloudflare AI apps
+  -- Dev+Ops of RAG apps (ISO chatbot)
   -- Dev+Ops of Android/iPhone applications
-  -- Dev+Ops of Web scraping/analytics apps for used car markets in CR and VE
-  -- Dev+Ops of Web scraping/analytics apps for real state market in CR and VE
-  -- Dev+Ops of Web scraping/analytics apps for TikTok sentiment analytics in CR and VE
   -- Dev+Ops of Elixir game server backend
-- Add CLI/Operator repository for git repository management
 
 ## Platform
 
