@@ -1,0 +1,24 @@
+---
+# Baseline Kyverno ClusterPolicies — a shared base stack applied after the kyverno
+# operator (dependsOn kyverno so the ClusterPolicy CRD exists, the same reason
+# cert-manager-config waits on cert-manager). Every policy is scoped to namespaces
+# labelled dantofa.dev/tenant, so restricted PSS + required resources + no-:latest are
+# enforced on app/tenant workloads without touching the platform's own (some
+# privileged) components. Static manifests, so no cluster-vars substitution.
+# Source-agnostic sourceRef, filled by the root's substitution.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kyverno-policies
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./flux/cluster/kyverno-policies
+  prune: true
+  wait: true
+  dependsOn:
+    - name: kyverno
+  sourceRef:
+    kind: ${source_kind}
+    name: ${source_name}
+    namespace: flux-system
