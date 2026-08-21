@@ -1,0 +1,30 @@
+---
+# Enforce the Kubernetes restricted Pod Security Standard on tenant workloads.
+# Scoped to namespaces labelled dantofa.dev/tenant, so the platform's own components
+# (some need host access, e.g. node-exporter / alloy-logs) are untouched — a tenant
+# opts in via that label and restricted PSS is then enforced on its Pods. Uses
+# Kyverno's built-in podSecurity subrule (tracks the upstream profile) rather than
+# hand-rolled checks. Enforce is safe: nothing carries the label yet, so no existing
+# workload is affected until an app deliberately onboards.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: tenant-restricted-pss
+spec:
+  background: true
+  rules:
+    - name: restricted
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaceSelector:
+                matchExpressions:
+                  - key: dantofa.dev/tenant
+                    operator: Exists
+      validate:
+        failureAction: Enforce
+        podSecurity:
+          level: restricted
+          version: latest

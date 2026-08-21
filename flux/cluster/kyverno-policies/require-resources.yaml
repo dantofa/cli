@@ -1,0 +1,35 @@
+---
+# Require CPU + memory requests and a memory limit on every container in tenant
+# namespaces. (A CPU limit is intentionally not required — it avoids CFS throttling
+# surprises; the tenant LimitRange still supplies defaults.) Scoped to
+# dantofa.dev/tenant namespaces; the tenant-namespace LimitRange provides defaults so
+# most workloads satisfy this without explicit values.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: tenant-require-resources
+spec:
+  background: true
+  rules:
+    - name: require-requests-and-limits
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaceSelector:
+                matchExpressions:
+                  - key: dantofa.dev/tenant
+                    operator: Exists
+      validate:
+        failureAction: Enforce
+        message: "Every container must set cpu+memory requests and a memory limit."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    memory: "?*"

@@ -1,0 +1,11 @@
+---
+# A tenant/app namespace. The dantofa.dev/tenant label is the opt-in: the platform's
+# baseline Kyverno policies (restricted PSS, required resources, no :latest) enforce
+# on any namespace carrying it, and the NetworkPolicy in this template isolates it
+# from other tenants. Set the label value (and the namespace name) to your app.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: example-app
+  labels:
+    dantofa.dev/tenant: example-app

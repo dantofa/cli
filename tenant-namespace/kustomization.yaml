@@ -1,0 +1,12 @@
+---
+# Reusable base for onboarding an app/tenant namespace. Copy this directory (or
+# reference it remotely) from a downstream repo, change `namespace:` + the Namespace
+# name/label to your app, then add your workloads. See README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: example-app
+resources:
+  - namespace.yaml
+  - resourcequota.yaml
+  - limitrange.yaml
+  - networkpolicy.yaml

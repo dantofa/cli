@@ -1,0 +1,45 @@
+---
+# Require an explicit, immutable image reference on tenant workloads: a tag must be
+# present and it must not be ':latest' (digest refs @sha256:... pass both rules).
+# Scoped to dantofa.dev/tenant namespaces.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: tenant-disallow-latest-tag
+spec:
+  background: true
+  rules:
+    - name: require-image-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaceSelector:
+                matchExpressions:
+                  - key: dantofa.dev/tenant
+                    operator: Exists
+      validate:
+        failureAction: Enforce
+        message: "An explicit image tag or digest is required."
+        pattern:
+          spec:
+            containers:
+              - image: "*:*"
+    - name: disallow-latest-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaceSelector:
+                matchExpressions:
+                  - key: dantofa.dev/tenant
+                    operator: Exists
+      validate:
+        failureAction: Enforce
+        message: "Using a mutable ':latest' image tag is not allowed."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
