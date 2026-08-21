@@ -1,0 +1,77 @@
+---
+# Local Tempo (monolithic) — the always-on base trace store and the k8s-monitoring
+# Alloy OTLP-receiver's trace destination, the trace analogue of the local Prometheus
+# (metrics) and Loki (logs) stores. Single-binary mode with local filesystem storage
+# and short (24h) block retention keeps it cheap on every cluster; the PVC uses
+# ${storage_class}. Receivers are pared to OTLP only (grpc 4317 / http 4318) — the
+# chart's default jaeger/opencensus receivers are dropped. Runs non-root (the chart
+# defaults to uid/fsGroup 10001); we add seccomp + drop caps. Sourced from the
+# maintained OSS chart (grafana-community) — the first-party grafana/tempo chart is
+# enterprise-only as of 2026-03 and its frozen line ships CVE-bearing images. Reuses
+# the `grafana-community` HelmRepository the loki stack registers (Flux retries until
+# it exists).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tempo
+  namespace: monitoring
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: tempo
+      # Exact pin; bumped by Renovate (flux manager).
+      version: "2.2.4"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana-community
+        namespace: monitoring
+      interval: 10m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    tempo:
+      reportingEnabled: false
+      # Short block retention keeps the small PVC bounded (traces are high volume).
+      retention: 24h
+      # Disable the 1GiB memory ballast — it dwarfs the lean memory limit below.
+      memBallastSizeMbs: 0
+      storage:
+        trace:
+          backend: local
+      # OTLP only — replace the chart's default jaeger/opencensus/otlp receiver set.
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: "0.0.0.0:4317"
+            http:
+              endpoint: "0.0.0.0:4318"
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
+      # Container securityContext (Tempo writes /var/tempo, so no readOnlyRootFilesystem).
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+    # Pod securityContext: keep the chart's non-root defaults, add seccomp.
+    securityContext:
+      runAsUser: 10001
+      runAsGroup: 10001
+      fsGroup: 10001
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    persistence:
+      enabled: true
+      storageClassName: ${storage_class}
+      size: 5Gi
