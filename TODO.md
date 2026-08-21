@@ -31,4 +31,6 @@
 - [DONE] Create reusable justfile template for common operations in downstream projects (e.g. local/preview/prod clusters)
 - [DONE] Add justfile plugin configuration for downstream project management
 - [DONE] Add image security gate
+- Add alerting on the collected telemetry (backup age/failure, cert expiry, node/disk pressure, cost budget, app SLOs), wired to central Grafana Cloud alerting
+- Add resilience hardening: PriorityClasses + PodDisruptionBudgets for the base platform stacks so they survive node drains/upgrades
 - [DEFERRED] Add support for GKE/EKS clusters
