@@ -48,6 +48,7 @@ cluster they provision:
 just cluster debug                              # snapshot cluster + Flux state
 just cluster verify backup|restore|image-scan   # verify platform infra
 just cluster local  create|verify|delete|test   # kind cluster lifecycle
+just cluster local  chromium|playwright [args]   # a browser wired to the cluster ingress
 ```
 
 Two ways to consume it, both rev-pinned via your lockfile:
@@ -77,7 +78,8 @@ e2e:
 ```
 
 Config comes from the environment (`DCTL`, `BASE_DOMAIN`, `TRIVYIGNORE_BASE` /
-`TRIVYIGNORE_LOCAL`) with sane defaults.
+`TRIVYIGNORE_LOCAL`, and for the browser recipes `CHROMIUM` / `PLAYWRIGHT` /
+`INGRESS_PORT`) with sane defaults.
 
 ## Development
 

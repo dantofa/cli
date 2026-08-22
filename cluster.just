@@ -260,6 +260,66 @@ cluster-local-delete *args:
 # Consumers wanting an app-inclusive e2e write their own recipe composing these.
 cluster-local-test: cluster-local-create cluster-local-verify && cluster-local-delete
 
+# (private) Print --host-resolver-rules mapping every local Ingress host to the port
+# the Traefik port-forward listens on, e.g. "MAP local.dantofa.dev 127.0.0.1:18080".
+# The error-prone bit, kept arg-free so `just shellcheck` lints it. Config via env:
+# ${KUBECONFIG:-.kubeconfig}, ${INGRESS_PORT:-18080}.
+[private]
+cluster-local-resolver-rules:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
+  port="${INGRESS_PORT:-18080}"
+  hosts="$(kubectl get ingress -A -o jsonpath='{range .items[*]}{range .spec.rules[*]}{.host}{"\n"}{end}{end}' | sort -u | sed '/^$/d')"
+  if [ -z "$hosts" ]; then
+    echo "no Ingress hosts found -- is the local cluster bootstrapped?" >&2
+    exit 1
+  fi
+  printf '%s\n' "$hosts" | sed "s#.*#MAP & 127.0.0.1:${port}#" | paste -sd, -
+
+# Launch Chromium wired to the local cluster's ingress: port-forward the local Traefik
+# and map every Ingress host to it via --host-resolver-rules, so the real hostnames
+# (e.g. local.dantofa.dev) resolve to the loopback with no DNS/tunnel. `*args` pass
+# through to Chromium (e.g. a URL to open). A fresh --user-data-dir forces a new
+# instance so the flags apply even if Chromium is already running. Assumes a
+# bootstrapped local cluster. Config: ${CHROMIUM:-chromium}, ${INGRESS_PORT:-18080}.
+cluster-local-chromium *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
+  port="${INGRESS_PORT:-18080}"
+  rules="$(just cluster-local-resolver-rules)"
+  kubectl -n traefik port-forward svc/traefik "${port}:80" >/dev/null 2>&1 &
+  pf=$!
+  trap 'kill "${pf}" 2>/dev/null || true' EXIT
+  sleep 2
+  # shellcheck disable=SC2206
+  chromium=(${CHROMIUM:-chromium})
+  "${chromium[@]}" --host-resolver-rules="$rules" --ignore-certificate-errors --user-data-dir="$(mktemp -d)" {{args}}
+
+# Run Playwright wired to the local cluster's ingress: port-forward the local Traefik
+# and export the --host-resolver-rules mapping as HOST_RESOLVER_RULES for your
+# playwright.config to apply to the browser launch args, e.g.:
+#   launchOptions: { args: process.env.HOST_RESOLVER_RULES
+#     ? [`--host-resolver-rules=${process.env.HOST_RESOLVER_RULES}`, '--ignore-certificate-errors'] : [] }
+# then set baseURL to your real ${BASE_DOMAIN} (it resolves to the loopback). `*args`
+# pass through to Playwright (e.g. `test`). Assumes a bootstrapped local cluster.
+# Config: ${PLAYWRIGHT:-npx playwright}, ${INGRESS_PORT:-18080}.
+cluster-local-playwright *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
+  port="${INGRESS_PORT:-18080}"
+  HOST_RESOLVER_RULES="$(just cluster-local-resolver-rules)"
+  export HOST_RESOLVER_RULES
+  kubectl -n traefik port-forward svc/traefik "${port}:80" >/dev/null 2>&1 &
+  pf=$!
+  trap 'kill "${pf}" 2>/dev/null || true' EXIT
+  sleep 2
+  # shellcheck disable=SC2206
+  playwright=(${PLAYWRIGHT:-npx playwright})
+  "${playwright[@]}" {{args}}
+
 # Snapshot cluster + Flux state into ./preview-diagnostics for CI to upload as
 # artifacts on a failed run (the cluster is destroyed afterwards, so this is the
 # only surviving record). Everything is best-effort: a partial capture from a
