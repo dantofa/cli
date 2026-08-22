@@ -50,12 +50,16 @@ const (
 	LocalRequirementsRootName = "local-requirements"
 	IngressRootName           = "ingress"
 	// DefaultTunnelIngressPath is the Cloudflare Tunnel ingress layer (outbound,
-	// no LoadBalancer): the default on kind and, unless --dolb is given, on DOKS
-	// too. DefaultRemoteIngressPath is the DOKS --dolb layer: Traefik + external-dns
-	// behind a DO LoadBalancer, proxied by Cloudflare. Both set their controller as
-	// the default IngressClass, so the same vanilla Ingress objects route on either.
+	// no LoadBalancer): the DOKS default unless --dolb is given.
+	// DefaultRemoteIngressPath is the DOKS --dolb layer: Traefik + external-dns
+	// behind a DO LoadBalancer, proxied by Cloudflare. DefaultLocalIngressPath is the
+	// kind default: Traefik on a ClusterIP Service, reached by port-forward + host
+	// resolution (no Cloudflare/tunnel), so local test traffic stays on the loopback.
+	// All set their controller as the default IngressClass, so the same vanilla
+	// Ingress objects route on any cluster type.
 	DefaultTunnelIngressPath = "./flux/ingress/tunnel"
 	DefaultRemoteIngressPath = "./flux/ingress/traefik"
+	DefaultLocalIngressPath  = "./flux/local/traefik"
 	// ExternalDNSRootName / DefaultExternalDNSPath is the DOKS DNS layer:
 	// external-dns (Cloudflare). It is its own stack (controller-agnostic) and
 	// DOKS-only — on kind the tunnel controller owns DNS.

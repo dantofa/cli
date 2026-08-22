@@ -1,6 +1,6 @@
 # TODO
 
-## Wave 0: Production-readiness foundation
+## Production-readiness foundation
 
 - [DONE] Cluster update verification: gate PRs on the _upgrade_ path, not just fresh convergence.
 - [DONE] Configure cluster backups (Velero cluster-object backup + restore drill). Database backups are out of platform scope: the platform ships no database, so the CloudNativePG operator was dropped (no consumer — Zitadel is not implemented here). A downstream project that owns a database owns its own DB backup capability.
@@ -15,22 +15,26 @@
 - [DONE] Add cost monitoring + budget alerts for DigitalOcean spend (clusters, LoadBalancers, Spaces); flag orphaned/leftover resources
 - [DONE] Validate the Let's Encrypt TLS path (`--tls-issuer letsencrypt` + Cloudflare DNS-01) against a real DOKS cluster — built but never run
   - [DONE] Add a staging issuer variant: `--tls-issuer staging` (Let's Encrypt staging ACME server, same Cloudflare DNS-01 solver) so preview and prod select the CA per cluster; production LE stays on prod only, and its rate limits stay off the preview path. Both ACME issuers share one reusable layer, split into two ordered reconcile roots — `cloudflare-api-token` (the Cloudflare DNS-01 token ExternalSecret) then `letsencrypt` (the ClusterIssuer, `dependsOn` the token so it never races an absent secret) — with the issuer name + ACME endpoint substituted per cluster via `${tls_issuer}`/`${acme_server}` cluster-vars.
+- [DONE] Add security monitoring gates
+  - [DONE] Add Trivy deployment manifests
+  - [DONE] Add image security gate
+- [IN PROGRESS] Add base application policies
+  - [DONE] Add base set of Kyverno governance policies
+    - Add PodDisruptionBudget policy to the base platform so stacks survive node drains/upgrades
 
-## Downstream projects
+## UX
 
-- Add Saas repository with initial agent framework. Interesting features:
-  -- Dev+Ops of Cloudflare workers/pages web apps
-  -- Dev+Ops of Cloudflare AI apps
-  -- Dev+Ops of RAG apps (ISO chatbot)
-  -- Dev+Ops of Android/iPhone applications
-  -- Dev+Ops of Elixir game server backend
+- [DONE] Create reusable justfile template for common operations in downstream projects (e.g. local/preview/prod clusters)
+- [DONE] Add justfile plugin configuration for downstream project management
+- [DONE] Move local tests from Cloudflare tunnels to local ingresses
+- [DONE] Build mechanism for accessing local cluster ingresses
+- Add SKILLS.md file to devbox plugin so Claude agents on downstream projects can effectively use the primitives implemented here
+- Add a tenant/app-namespace onboarding template (namespace + quota + limits + isolation NetworkPolicy) — deferred until a downstream app informs its shape
+
+## Monitoring
+
+- Add alerting on the collected telemetry (backup age/failure, cert expiry, node/disk pressure, cost budget, app SLOs), wired to central Grafana Cloud alerting
 
 ## Platform
 
-- [DONE] Add Trivy deployment manifests
-- [DONE] Create reusable justfile template for common operations in downstream projects (e.g. local/preview/prod clusters)
-- [DONE] Add justfile plugin configuration for downstream project management
-- [DONE] Add image security gate
-- Add alerting on the collected telemetry (backup age/failure, cert expiry, node/disk pressure, cost budget, app SLOs), wired to central Grafana Cloud alerting
-- Add resilience hardening: PriorityClasses + PodDisruptionBudgets for the base platform stacks so they survive node drains/upgrades
 - [DEFERRED] Add support for GKE/EKS clusters

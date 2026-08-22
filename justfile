@@ -138,29 +138,39 @@ sast:
   if echo "$affected" | grep -qv 'Go standard library'; then exit 1; fi
   echo "::warning::govulncheck: only standard-library vulnerabilities affect this code; bump the Go toolchain via 'just update'."
 
-# Full local (kind) tunnel e2e for the PLATFORM itself -- the platform's own
-# compose recipe over the shared `cluster local` primitives, adding the parts that
-# are platform self-tests: echo reachable at /echo through the live Cloudflare
-# tunnel, and that the graceful teardown actually reaps the tunnel object (the leak
-# PR #18 fixed). Requires the dev shell (kind/flux/kubectl/curl/jq/bws on PATH) and
-# BWS_ACCESS_TOKEN / BWS_PROJECT_ID / BWS_ORGANIZATION_ID in the environment. Uses
-# bash-local vars (not just-interpolation) so `just shellcheck` still lints it. A
-# failed run leaves the cluster up for debugging; run `just cluster local delete`.
+# Full local (kind) e2e for the PLATFORM itself -- the platform's own compose recipe
+# over the shared `cluster local` primitives, adding the platform self-test: echo
+# reachable at /echo through the local Traefik ingress, with no Cloudflare/tunnel in
+# the path, so traffic stays on the loopback (no WAN round-trip / 520 flakiness). It
+# port-forwards Traefik and resolves the real ${base_domain} to the forwarded port --
+# the same mechanism a `curl --resolve` / Playwright `--host-resolver-rules` run uses.
+# Requires the dev shell (kind/flux/kubectl/curl/jq/bws on PATH) and BWS_* in the
+# environment (for the ESO secret-zero). Uses bash-local vars (not just-interpolation)
+# so `just shellcheck` still lints it. A failed run leaves the cluster up for
+# debugging; run `just cluster local delete`.
 local-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
   base_domain=local.dantofa.dev
-  cluster=local
+  port=18080
   just cluster local create
   just cluster local verify
-  # Platform app-test: echo served at /echo through the tunnel + Cloudflare.
   export KUBECONFIG=.kubeconfig
-  retries=24
-  sleep=10
-  url="https://$base_domain/echo"
-  echo "Probing ${url} through the Cloudflare tunnel..."
+  # Reach the in-cluster Traefik from the host: port-forward it (kind has no
+  # LoadBalancer) and resolve the real hostname to the forwarded port, so echo is
+  # served over its normal Ingress with nothing external in the path.
+  echo "Waiting for Traefik to be ready..."
+  kubectl -n traefik rollout status deploy/traefik --timeout=180s
+  kubectl -n traefik port-forward svc/traefik "${port}:80" >/dev/null 2>&1 &
+  pf=$!
+  trap 'kill "${pf}" 2>/dev/null || true' EXIT
+  sleep 2
+  url="http://${base_domain}:${port}/echo"
+  echo "Probing ${url} via local ingress (resolving ${base_domain} -> 127.0.0.1)..."
+  retries=12
+  sleep=5
   for i in $(seq 1 "$retries"); do
-    if body="$(curl -fsS --max-time 8 "$url")" \
+    if body="$(curl -fsS --max-time 8 --resolve "${base_domain}:${port}:127.0.0.1" "$url")" \
       && printf '%s' "$body" | grep -q "$base_domain"; then
       echo "e2e OK: echo reachable via ${url}"
       break
@@ -172,15 +182,9 @@ local-e2e:
     echo "attempt ${i}/${retries}: not ready, retrying in ${sleep}s..."
     sleep "$sleep"
   done
-  # Precondition for the teardown test: the tunnel object exists in Cloudflare.
-  n="$(just _cf-tunnel-count "$cluster")"
-  echo "cloudflare tunnels named $cluster: $n"
-  test "$n" -ge 1
-  # The graceful teardown must reap the tunnel object.
+  kill "${pf}" 2>/dev/null || true
+  trap - EXIT
   just cluster local delete
-  n="$(just _cf-tunnel-count "$cluster")"
-  echo "cloudflare tunnels named $cluster after teardown: $n"
-  test "$n" -eq 0
 
 # Print how many non-deleted Cloudflare Tunnels are named <name> (via the bws
 # project's CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID). Internal helper for the
