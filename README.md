@@ -59,12 +59,14 @@ Two ways to consume it, both rev-pinned via your lockfile:
   { "include": ["github:dantofa/platform?dir=devbox"] }
   ```
 
-- **Nix flake** — the module and base ignore list are flake outputs
-  (`packages.cluster-just`, `packages.trivyignore-base`); materialize them into
-  `./.just` in your dev shell.
+- **Nix flake** — the module, base ignore list, and agent skill are flake outputs
+  (`packages.cluster-just`, `packages.trivyignore-base`, `packages.skills`);
+  materialize them into your dev shell.
 
-Either way `.just/cluster.just` lands in your project; import it and compose your
-own end-to-end flow over the primitives:
+Either way `.just/cluster.just` lands in your project (import it and compose your own
+end-to-end flow over the primitives), and the platform's agent skill lands in
+`.claude/skills/dantofa-platform/SKILL.md` so Claude agents on your project discover the
+platform's conventions/infrastructure and reuse them (see [`SKILLS.md`](SKILLS.md)):
 
 ```just
 import '.just/cluster.just'

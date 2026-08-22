@@ -5,7 +5,8 @@
     "github:dantofa/platform#default",
     "github:dantofa/platform#cluster-toolchain",
     "github:dantofa/platform#cluster-just",
-    "github:dantofa/platform#trivyignore-base"
+    "github:dantofa/platform#trivyignore-base",
+    "github:dantofa/platform#skills"
   ],
   "env": {
     "DCTL": "dctl",
@@ -17,7 +18,9 @@
     "init_hook": [
       "mkdir -p .just",
       "install -m 0644 \"$DEVBOX_PACKAGES_DIR/cluster.just\" .just/cluster.just",
-      "install -m 0644 \"$DEVBOX_PACKAGES_DIR/trivyignore-cluster\" .just/.trivyignore-base"
+      "install -m 0644 \"$DEVBOX_PACKAGES_DIR/trivyignore-cluster\" .just/.trivyignore-base",
+      "mkdir -p .claude/skills/dantofa-platform",
+      "install -m 0644 \"$DEVBOX_PACKAGES_DIR/SKILL.md\" .claude/skills/dantofa-platform/SKILL.md"
     ]
   }
 }

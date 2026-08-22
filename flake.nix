@@ -126,6 +126,15 @@
           destination = "/trivyignore-cluster";
           text = builtins.readFile ./.trivyignore-cluster;
         };
+        # The downstream-agent skill: the platform's conventions, infrastructure, and
+        # primitives, so Claude agents on consuming projects reuse the platform instead
+        # of rebuilding it. The devbox plugin materializes it into .claude/skills for
+        # auto-discovery. Trivial text derivation (no dctl/vendorHash impact).
+        skills = (pkgsFor system).writeTextFile {
+          name = "dantofa-platform-skill";
+          destination = "/SKILL.md";
+          text = builtins.readFile ./SKILLS.md;
+        };
         # The CLIs the cluster.just recipes shell out to (dctl comes from
         # `default`), pinned to the same nixpkgs as everything else — bundled for
         # downstream consumers via the devbox plugin so `just cluster …` runs

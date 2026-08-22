@@ -28,7 +28,7 @@
 - [DONE] Add justfile plugin configuration for downstream project management
 - [DONE] Move local tests from Cloudflare tunnels to local ingresses
 - [DONE] Build mechanism for accessing local cluster ingresses
-- Add SKILLS.md file to devbox plugin so Claude agents on downstream projects can effectively use the primitives implemented here
+- [DONE] Add SKILLS.md file to devbox plugin so Claude agents on downstream projects can effectively use the primitives implemented here
 - Add a tenant/app-namespace onboarding template (namespace + quota + limits + isolation NetworkPolicy) — deferred until a downstream app informs its shape
 
 ## Monitoring
