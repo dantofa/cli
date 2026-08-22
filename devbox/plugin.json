@@ -9,7 +9,9 @@
   ],
   "env": {
     "DCTL": "dctl",
-    "TRIVYIGNORE_BASE": ".just/.trivyignore-base"
+    "TRIVYIGNORE_BASE": ".just/.trivyignore-base",
+    "PLAYWRIGHT_BROWSERS_PATH": "$DEVBOX_PACKAGES_DIR",
+    "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS": "true"
   },
   "shell": {
     "init_hook": [
