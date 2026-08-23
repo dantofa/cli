@@ -36,6 +36,26 @@ So: no app-shipped Prometheus/Loki/Tempo/Grafana, no app-shipped ingress control
 cert-manager, no bespoke log/metric shipping. Emit signals the standard way and the
 platform collects them.
 
+## Project setup (devbox plugin)
+Add the platform's **devbox plugin** (`github:dantofa/platform`) to your `devbox.json`.
+It puts `dctl` + the CLI toolchain on `PATH` and, on every `devbox` shell init,
+**materializes generated files into the project tree**, rev-pinned to the platform
+version by `devbox.lock`:
+- `.just/cluster.just` + `.just/.trivyignore-base` — the shared cluster-ops module your
+  justfile `import`s.
+- `.claude/skills/dantofa-platform/SKILL.md` — this skill (Claude Code auto-loads it).
+
+Because they are **regenerated every init and pinned by `devbox.lock`**, they are build
+output: **don't commit them** — a committed copy silently drifts from the pin. You don't
+have to manage this by hand: the plugin's `init_hook` **adds their ignore entries to your
+`.gitignore` for you** (idempotent, append-if-missing). Commit the pin, not its output.
+- **Commit**: `.gitignore` (now carrying those entries), `devbox.json`, `devbox.lock`.
+- **Plugin-managed ignores**: `.just/`, `.claude/skills/dantofa-platform/`, `.devbox/`,
+  `.claude/settings.local.json`.
+- It ignores the **specific** generated `.claude/` paths — **not** the whole `.claude/`
+  directory — so a hand-authored `.claude/settings.json` or your own
+  `.claude/skills/<name>/` stays committable.
+
 ## Domain conventions
 - Every cluster has a `base_domain` (Flux cluster-var `${base_domain}`) — e.g.
   `local.dantofa.dev`, `preview.dantofa.dev`, `dantofa.dev`.
