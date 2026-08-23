@@ -16,6 +16,7 @@
   },
   "shell": {
     "init_hook": [
+      "for p in '.just/' '.claude/skills/dantofa-platform/' '.devbox/' '.claude/settings.local.json'; do grep -qxF \"$p\" .gitignore 2>/dev/null || printf '%s\\n' \"$p\" >> .gitignore; done",
       "mkdir -p .just",
       "install -m 0644 \"$DEVBOX_PACKAGES_DIR/cluster.just\" .just/cluster.just",
       "install -m 0644 \"$DEVBOX_PACKAGES_DIR/trivyignore-cluster\" .just/.trivyignore-base",
