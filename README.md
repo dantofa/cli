@@ -9,7 +9,7 @@ It deploys a fixed platform toolset via Flux:
 - **Governance:** baseline Kyverno policies (`flux/cluster/kyverno-policies/`) enforce restricted Pod Security, required resource requests/limits, and no `:latest` on any namespace labelled `dantofa.dev/tenant` — the opt-in an app takes via the `tenant-namespace/` onboarding template (namespace + quota + limits + isolation NetworkPolicy). Platform components are unaffected (unlabelled).
 - **Metrics, log & trace collection (all clusters):** Grafana Alloy + node-exporter + kube-state-metrics (k8s-monitoring) and the prometheus-operator CRDs — scraping to an always-on local Prometheus store, tailing pod logs to an always-on local Loki store, and receiving app OTLP traces into an always-on local Tempo store (all short retention). A cost-exporter publishes the cluster's DO price constants (node/storage/LB/transfer, priced from the DO Sizes API at bootstrap) as `dantofa_*` metrics for a central cost dashboard.
 - **DOKS:** Cloudflare Tunnel controller by default (outbound-only, no LoadBalancer); with `--dolb`, Traefik + external-dns behind a DO LoadBalancer instead.
-- **kind (local):** Cloudflare Tunnel controller, SeaweedFS.
+- **kind (local):** Traefik ingress on a ClusterIP Service (reached via `kubectl port-forward` — no Cloudflare/tunnel, so local test traffic stays on the loopback), SeaweedFS.
 - **With `--grafana-cloud`:** a curated metrics subset (including the `dantofa_*` cost series) is forwarded to Grafana Cloud, labelled by `cluster`/`env`. Visualization is Grafana-Cloud-only — the platform ships data, not dashboards; dashboards/alerts are managed centrally (see `dashboards/` for the reference cost dashboard, ready for Grafana Cloud Git Sync or Terraform).
 
 ## Install
@@ -48,6 +48,7 @@ cluster they provision:
 just cluster debug                              # snapshot cluster + Flux state
 just cluster verify backup|restore|image-scan   # verify platform infra
 just cluster local  create|verify|delete|test   # kind cluster lifecycle
+just cluster local  chromium|playwright|curl [args]  # a browser/curl wired to the cluster ingress
 ```
 
 Two ways to consume it, both rev-pinned via your lockfile:
@@ -58,12 +59,14 @@ Two ways to consume it, both rev-pinned via your lockfile:
   { "include": ["github:dantofa/platform?dir=devbox"] }
   ```
 
-- **Nix flake** — the module and base ignore list are flake outputs
-  (`packages.cluster-just`, `packages.trivyignore-base`); materialize them into
-  `./.just` in your dev shell.
+- **Nix flake** — the module, base ignore list, and agent skill are flake outputs
+  (`packages.cluster-just`, `packages.trivyignore-base`, `packages.skills`);
+  materialize them into your dev shell.
 
-Either way `.just/cluster.just` lands in your project; import it and compose your
-own end-to-end flow over the primitives:
+Either way `.just/cluster.just` lands in your project (import it and compose your own
+end-to-end flow over the primitives), and the platform's agent skill lands in
+`.claude/skills/dantofa-platform/SKILL.md` so Claude agents on your project discover the
+platform's conventions/infrastructure and reuse them (see [`SKILLS.md`](SKILLS.md)):
 
 ```just
 import '.just/cluster.just'
@@ -77,7 +80,8 @@ e2e:
 ```
 
 Config comes from the environment (`DCTL`, `BASE_DOMAIN`, `TRIVYIGNORE_BASE` /
-`TRIVYIGNORE_LOCAL`) with sane defaults.
+`TRIVYIGNORE_LOCAL`, and for the browser recipes `CHROMIUM` / `PLAYWRIGHT` /
+`INGRESS_PORT`) with sane defaults.
 
 ## Development
 

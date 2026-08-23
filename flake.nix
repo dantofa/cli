@@ -55,6 +55,19 @@
         pkgs.git
       ];
 
+      # Browser tooling for the cluster.just `local-chromium` / `local-playwright`
+      # recipes (a browser wired to the local ingress via --host-resolver-rules).
+      # Deliberately NOT in runtimeTools (dctl never shells out to these) — they live
+      # in the dev shell and the downstream cluster-toolchain only. Playwright also
+      # needs PLAYWRIGHT_BROWSERS_PATH pointed at playwright-driver.browsers (set in
+      # the dev-shell env and the devbox plugin) so it uses the Nix-provided browsers
+      # instead of downloading its own, which don't run on Nix.
+      browserTools = pkgs: [
+        pkgs.chromium
+        pkgs.nodejs
+        pkgs.playwright-driver.browsers
+      ];
+
       dctlFor =
         system:
         let
@@ -113,6 +126,15 @@
           destination = "/trivyignore-cluster";
           text = builtins.readFile ./.trivyignore-cluster;
         };
+        # The downstream-agent skill: the platform's conventions, infrastructure, and
+        # primitives, so Claude agents on consuming projects reuse the platform instead
+        # of rebuilding it. The devbox plugin materializes it into .claude/skills for
+        # auto-discovery. Trivial text derivation (no dctl/vendorHash impact).
+        skills = (pkgsFor system).writeTextFile {
+          name = "dantofa-platform-skill";
+          destination = "/SKILL.md";
+          text = builtins.readFile ./SKILLS.md;
+        };
         # The CLIs the cluster.just recipes shell out to (dctl comes from
         # `default`), pinned to the same nixpkgs as everything else — bundled for
         # downstream consumers via the devbox plugin so `just cluster …` runs
@@ -129,7 +151,7 @@
               pkgs.velero
               pkgs.jq
               pkgs.fluxcd
-            ];
+            ] ++ (browserTools pkgs);
           };
       });
 
@@ -153,7 +175,7 @@
           # the same kind/flux/docker/git the packaged dctl bundles. Enter with
           # `nix develop` (or `direnv`).
           default = pkgs.mkShell {
-            packages = (runtimeTools pkgs) ++ [
+            packages = (runtimeTools pkgs) ++ (browserTools pkgs) ++ [
               # Go toolchain + analyzers.
               pkgs.go
               pkgs.gopls
@@ -182,6 +204,12 @@
             # `nix run …#default --` (for downstream), so override it here to the
             # working tree, so `just cluster local …` never runs a stale artifact.
             DCTL = "go run ./cmd/dctl";
+            # Point Playwright (npx or nixpkgs) at the Nix-provided browsers rather
+            # than its own download (which isn't runnable on Nix); skip the host-lib
+            # check since those deps come from Nix, not the host distro. Downstream's
+            # @playwright/test version should match this playwright-driver.
+            PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
+            PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
             shellHook = ''
               # Put `just build` output on PATH so the fast, cache-backed local
               # build is callable as `dctl` (the intended entrypoint) without a

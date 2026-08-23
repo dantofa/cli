@@ -260,6 +260,102 @@ cluster-local-delete *args:
 # Consumers wanting an app-inclusive e2e write their own recipe composing these.
 cluster-local-test: cluster-local-create cluster-local-verify && cluster-local-delete
 
+# (private) Print the unique Ingress hostnames on the local cluster, one per line. The
+# error-prone extraction kept in one place, arg-free so `just shellcheck` lints it.
+# Config via env: ${KUBECONFIG:-.kubeconfig}.
+[private]
+cluster-local-ingress-hosts:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
+  hosts="$(kubectl get ingress -A -o jsonpath='{range .items[*]}{range .spec.rules[*]}{.host}{"\n"}{end}{end}' | sort -u | sed '/^$/d')"
+  if [ -z "$hosts" ]; then
+    echo "no Ingress hosts found -- is the local cluster bootstrapped?" >&2
+    exit 1
+  fi
+  printf '%s\n' "$hosts"
+
+# (private) Chromium --host-resolver-rules mapping every Ingress host to the forwarded
+# Traefik port, e.g. "MAP local.dantofa.dev 127.0.0.1:18443". Config: ${INGRESS_PORT:-18443}.
+[private]
+cluster-local-resolver-rules:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  port="${INGRESS_PORT:-18443}"
+  just cluster-local-ingress-hosts | sed "s#.*#MAP & 127.0.0.1:${port}#" | paste -sd, -
+
+# (private) curl --connect-to args sending every Ingress host (:443) to the forwarded
+# Traefik port, e.g. "--connect-to local.dantofa.dev:443:127.0.0.1:18443" -- the curl
+# analogue of the resolver rules (redirects host+port, so the real URLs still work).
+# Config: ${INGRESS_PORT:-18443}.
+[private]
+cluster-local-connect-to:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  port="${INGRESS_PORT:-18443}"
+  just cluster-local-ingress-hosts | sed "s#.*#--connect-to &:443:127.0.0.1:${port}#" | paste -sd' ' -
+
+# Launch Chromium wired to the local cluster's ingress: port-forward the local Traefik
+# and map every Ingress host to it via --host-resolver-rules, so the real hostnames
+# (e.g. local.dantofa.dev) resolve to the loopback with no DNS/tunnel. `*args` pass
+# through to Chromium (e.g. a URL to open). A fresh --user-data-dir forces a new
+# instance so the flags apply even if Chromium is already running. Assumes a
+# bootstrapped local cluster. Config: ${CHROMIUM:-chromium}, ${INGRESS_PORT:-18443}.
+cluster-local-chromium *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
+  port="${INGRESS_PORT:-18443}"
+  rules="$(just cluster-local-resolver-rules)"
+  kubectl -n traefik port-forward svc/traefik "${port}:443" >/dev/null 2>&1 &
+  pf=$!
+  trap 'kill "${pf}" 2>/dev/null || true' EXIT
+  sleep 2
+  # shellcheck disable=SC2206
+  chromium=(${CHROMIUM:-chromium})
+  "${chromium[@]}" --host-resolver-rules="$rules" --ignore-certificate-errors --user-data-dir="$(mktemp -d)" {{args}}
+
+# Run Playwright wired to the local cluster's ingress: port-forward the local Traefik
+# and export the --host-resolver-rules mapping as HOST_RESOLVER_RULES for your
+# playwright.config to apply to the browser launch args, e.g.:
+#   launchOptions: { args: process.env.HOST_RESOLVER_RULES
+#     ? [`--host-resolver-rules=${process.env.HOST_RESOLVER_RULES}`, '--ignore-certificate-errors'] : [] }
+# then set baseURL to your real ${BASE_DOMAIN} (it resolves to the loopback). `*args`
+# pass through to Playwright (e.g. `test`). Assumes a bootstrapped local cluster.
+# Config: ${PLAYWRIGHT:-npx playwright}, ${INGRESS_PORT:-18443}.
+cluster-local-playwright *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
+  port="${INGRESS_PORT:-18443}"
+  HOST_RESOLVER_RULES="$(just cluster-local-resolver-rules)"
+  export HOST_RESOLVER_RULES
+  kubectl -n traefik port-forward svc/traefik "${port}:443" >/dev/null 2>&1 &
+  pf=$!
+  trap 'kill "${pf}" 2>/dev/null || true' EXIT
+  sleep 2
+  # shellcheck disable=SC2206
+  playwright=(${PLAYWRIGHT:-npx playwright})
+  "${playwright[@]}" {{args}}
+
+# curl the local cluster ingress: port-forward the local Traefik and use --connect-to
+# to send requests for every Ingress host (:443) to it, so you curl the real URLs
+# (e.g. https://local.dantofa.dev/echo) with nothing external in the path -- the curl
+# analogue of the local-chromium/playwright recipes. `*args` pass through to curl (the
+# URL + any flags). Assumes a bootstrapped local cluster. Config: ${INGRESS_PORT:-18443}.
+cluster-local-curl *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
+  port="${INGRESS_PORT:-18443}"
+  # shellcheck disable=SC2207
+  connect=($(just cluster-local-connect-to))
+  kubectl -n traefik port-forward svc/traefik "${port}:443" >/dev/null 2>&1 &
+  pf=$!
+  trap 'kill "${pf}" 2>/dev/null || true' EXIT
+  sleep 2
+  curl --insecure "${connect[@]}" {{args}}
+
 # Snapshot cluster + Flux state into ./preview-diagnostics for CI to upload as
 # artifacts on a failed run (the cluster is destroyed afterwards, so this is the
 # only surviving record). Everything is best-effort: a partial capture from a

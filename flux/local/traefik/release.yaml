@@ -1,0 +1,51 @@
+---
+# Traefik as the kind (local) ingress controller. Lives under flux/local (the
+# kind-only tree) because it is deliberately local-specific: unlike the DOKS Traefik
+# (flux/ingress/traefik), it drops the DO LoadBalancer + Cloudflare IP allowlist, the
+# external-dns publishedService, and the cert-manager default cert. It is a ClusterIP
+# Service reached from the host by `kubectl port-forward` (kind has no LoadBalancer),
+# serving Traefik's built-in self-signed cert — no Cloudflare, no tunnel, no bws token.
+# It is the default IngressClass, so the same vanilla Ingress objects route here just
+# as on DOKS. Vanilla Ingresses (no `tls:` block) serve on the web (80) entrypoint, so
+# tests hit http://${base_domain}/... over the forwarded port; websecure (443) serves
+# the self-signed cert for apps that want TLS. This keeps local test traffic on the
+# loopback (no WAN round-trip / 520s); the tunnel path stays the DOKS default.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: traefik
+  namespace: traefik
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: traefik
+      # Exact pin; bumped by Renovate (flux manager).
+      version: "41.0.2"
+      sourceRef:
+        kind: HelmRepository
+        name: traefik
+        namespace: traefik
+      interval: 1h
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    ingressClass:
+      enabled: true
+      isDefaultClass: true
+    service:
+      spec:
+        type: ClusterIP
+    resources:
+      requests:
+        cpu: 50m
+        memory: 96Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
