@@ -2,14 +2,21 @@
 # Traefik as the kind (local) ingress controller. Lives under flux/local (the
 # kind-only tree) because it is deliberately local-specific: unlike the DOKS Traefik
 # (flux/ingress/traefik), it drops the DO LoadBalancer + Cloudflare IP allowlist, the
-# external-dns publishedService, and the cert-manager default cert. It is a ClusterIP
-# Service reached from the host by `kubectl port-forward` (kind has no LoadBalancer),
-# serving Traefik's built-in self-signed cert — no Cloudflare, no tunnel, no bws token.
+# external-dns publishedService, and the cert-manager default cert, serving Traefik's
+# built-in self-signed cert instead — no Cloudflare, no tunnel, no bws token.
+#
+# It is a NodePort Service on FIXED nodePorts, which kind maps to the host's real
+# :80/:443 (extraPortMappings, rendered from localcore.IngressPortMappings — keep the
+# two in sync; they are one contract). Combined with the wildcard DNS record pointing
+# ${base_domain} at 127.0.0.1, that means host tools reach the cluster at its real URL
+# — https://${base_domain}/... — with no port-forward and no per-tool resolver flags.
+# kind has no LoadBalancer, so NodePort + host publication is what stands in for one.
+#
 # It is the default IngressClass, so the same vanilla Ingress objects route here just
-# as on DOKS. Vanilla Ingresses (no `tls:` block) serve on the web (80) entrypoint, so
-# tests hit http://${base_domain}/... over the forwarded port; websecure (443) serves
-# the self-signed cert for apps that want TLS. This keeps local test traffic on the
-# loopback (no WAN round-trip / 520s); the tunnel path stays the DOKS default.
+# as on DOKS. Vanilla Ingresses (no `tls:` block) serve on the web (80) entrypoint;
+# websecure (443) serves the self-signed cert for apps that want TLS. This keeps local
+# test traffic on the loopback (no WAN round-trip / 520s); the tunnel path stays the
+# DOKS default.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -39,9 +46,25 @@ spec:
     ingressClass:
       enabled: true
       isDefaultClass: true
+    # Serve the cert-manager-issued default cert (certificate.yaml) on every
+    # origin connection, so a vanilla Ingress with no `tls:` block still gets a
+    # cert whose SANs match ${base_domain} — verifiable against the exported
+    # local CA instead of needing a skip-verify flag per tool.
+    tlsStore:
+      default:
+        defaultCertificate:
+          secretName: traefik-default-tls
     service:
       spec:
-        type: ClusterIP
+        type: NodePort
+    # Pinned nodePorts: kind's extraPortMappings target these by number at cluster
+    # CREATE time, long before this HelmRelease exists, so they cannot be allocated
+    # dynamically. Must match localcore.IngressHTTPNodePort / IngressHTTPSNodePort.
+    ports:
+      web:
+        nodePort: 30080
+      websecure:
+        nodePort: 30443
     resources:
       requests:
         cpu: 50m

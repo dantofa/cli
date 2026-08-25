@@ -1,0 +1,34 @@
+---
+# The local development CA. cert-manager mints a self-signed root here (via the
+# always-present `selfsigned` ClusterIssuer), and the `local-ca` ClusterIssuer
+# beside it issues every local ingress cert from it — most importantly Traefik's
+# default cert, which then carries the real ${base_domain} SANs.
+#
+# Why a CA and not just a self-signed leaf: the CA is the trust anchor a developer
+# exports ONCE (`just cluster local ca`) and points SSL_CERT_FILE / CURL_CA_BUNDLE /
+# REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS at. Leaf certs rotate every 90d without
+# invalidating it, and a downstream app can mint its own certs from the same issuer
+# while that one exported file keeps working. A bare self-signed leaf would be its
+# own anchor, so every rotation would stale the developer's trust file.
+#
+# The secret lands in the cert-manager namespace because a ClusterIssuer resolves
+# its ca.secretName there (the cluster-resource namespace), not in the namespace of
+# whatever consumes the cert.
+#
+# Long-lived (10y) on purpose: this is a throwaway per-cluster dev root that never
+# leaves the loopback, and a short duration would only mean re-exporting the anchor.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: local-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: dantofa local development CA
+  secretName: local-ca
+  duration: 87600h # 10y
+  renewBefore: 8760h # 1y
+  issuerRef:
+    name: selfsigned
+    kind: ClusterIssuer
+    group: cert-manager.io

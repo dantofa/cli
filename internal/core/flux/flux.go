@@ -53,13 +53,23 @@ const (
 	// no LoadBalancer): the DOKS default unless --dolb is given.
 	// DefaultRemoteIngressPath is the DOKS --dolb layer: Traefik + external-dns
 	// behind a DO LoadBalancer, proxied by Cloudflare. DefaultLocalIngressPath is the
-	// kind default: Traefik on a ClusterIP Service, reached by port-forward + host
-	// resolution (no Cloudflare/tunnel), so local test traffic stays on the loopback.
+	// kind default: Traefik on a NodePort Service that kind publishes to the host's
+	// real :80/:443, so the base domain's loopback DNS record reaches it directly (no
+	// Cloudflare/tunnel), keeping local test traffic on the loopback.
 	// All set their controller as the default IngressClass, so the same vanilla
 	// Ingress objects route on any cluster type.
 	DefaultTunnelIngressPath = "./flux/ingress/tunnel"
 	DefaultRemoteIngressPath = "./flux/ingress/traefik"
 	DefaultLocalIngressPath  = "./flux/local/traefik"
+	// LocalCARootName / DefaultLocalCAPath is the kind-only local CA layer: a
+	// self-signed root minted by cert-manager plus the `local-ca` ClusterIssuer that
+	// issues every local ingress cert from it. It exists so the local Traefik default
+	// cert carries the real ${base_domain} SANs — making it verifiable against one
+	// exported trust anchor instead of needing a skip-verify flag in every tool.
+	// Ordered between cert-manager-config (whose `selfsigned` ClusterIssuer mints the
+	// root) and the ingress layer (whose Certificate names this issuer).
+	LocalCARootName    = "local-ca"
+	DefaultLocalCAPath = "./flux/local/ca"
 	// ExternalDNSRootName / DefaultExternalDNSPath is the DOKS DNS layer:
 	// external-dns (Cloudflare). It is its own stack (controller-agnostic) and
 	// DOKS-only — on kind the tunnel controller owns DNS.

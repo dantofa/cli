@@ -26,8 +26,10 @@ your task to a section, follow the convention, reuse the primitive.
   scanning + gate), prometheus-operator CRDs, an always-on local Prometheus (metrics),
   local Loki (logs), local Tempo (traces), Grafana Alloy collectors, and a cost-exporter.
 - **Ingress**: Cloudflare Tunnel (DOKS default) or Traefik + external-dns behind a DO
-  LoadBalancer (`--dolb`); a local-only Traefik (ClusterIP) on kind.
-- **TLS**: cert-manager — selfsigned by default, or Let's Encrypt via Cloudflare DNS-01.
+  LoadBalancer (`--dolb`); a local-only Traefik on kind, published on the host's real
+  `:80`/`:443`.
+- **TLS**: cert-manager — selfsigned by default, Let's Encrypt via Cloudflare DNS-01 on
+  DOKS, and an in-cluster CA on kind. See "Which TLS issuer applies where".
 - **Secrets**: Bitwarden via ESO.
 - **Observability collection**: Alloy scrapes metrics/logs/traces to the local stores
   and (opt-in) forwards a curated subset to Grafana Cloud.
@@ -115,32 +117,149 @@ and compose YOUR own end-to-end flow over its primitives (the module never calls
 into your recipes):
 
 - **Local (kind)** — `just cluster local create` (create + bootstrap) / `verify` /
-  `delete` / `test`. Ingress is a local Traefik ClusterIP; no Cloudflare, no tunnel.
+  `delete` / `test`. Ingress is a local Traefik NodePort published on the host's real
+  `:80`/`:443`; no Cloudflare, no tunnel.
 - **Preview (DOKS, ephemeral)** —
-  `dctl … cluster bootstrap --base-domain preview.dantofa.dev --tls-issuer staging [--grafana-cloud]`.
-  Let's Encrypt **staging** keeps prod rate limits off the preview path; treat as
-  disposable.
+  `dctl … cluster bootstrap --base-domain preview.dantofa.dev [--grafana-cloud]`.
+  Ingress is the Cloudflare Tunnel, which terminates TLS at the edge, so **no
+  `--tls-issuer` is needed** (passing one without `--dolb` is inert and warns). Treat
+  as disposable.
 - **Production (DOKS)** — create with `--ha` and a node size, then
   `dctl … cluster bootstrap --base-domain <domain> --dolb --tls-issuer letsencrypt --env prod [--grafana-cloud]`.
   Traefik + external-dns behind a DO LoadBalancer, a real Let's Encrypt cert.
 
 A downstream e2e is your own recipe: `create → deploy your app → test → delete`.
 
+### Which TLS issuer applies where
+
+`--tls-issuer` is a **DOKS-only** flag, and even there it only takes effect with
+`--dolb` — it names the issuer of the *Traefik default cert*, and without a
+LoadBalancer ingress there is no such cert to issue. It defaults to `selfsigned`.
+
+| Cluster shape | What signs the cert clients see | `--tls-issuer` | What a client must do |
+| --- | --- | --- | --- |
+| **kind (local)** | `local-ca` — a cert-manager CA minted in-cluster | not accepted | export the CA (`just cluster local ca`), or use `http://` |
+| **DOKS, default (Cloudflare Tunnel)** | Cloudflare's edge cert (publicly trusted) | **ignored** — warns if set to a non-default | nothing |
+| **DOKS `--dolb`, preview** | cert-manager `selfsigned` ClusterIssuer, behind Cloudflare **Full** | `selfsigned` (default) | nothing — the edge does not verify the origin cert |
+| **DOKS `--dolb`, production** | Let's Encrypt via Cloudflare DNS-01, behind Cloudflare **Full strict** | `letsencrypt` | nothing — publicly trusted |
+| **DOKS `--dolb`, ACME dry-run** | Let's Encrypt **staging** CA via DNS-01 | `staging` | trust the LE staging root — staging certs are *not* publicly trusted |
+
+Note that `selfsigned` and the local `local-ca` are not the same mechanism, despite
+both being self-signed in origin: `selfsigned` issues a self-signed **leaf** (fine
+behind Cloudflare Full, which does not verify the origin), while `local-ca` mints a
+**CA** whose leaves rotate under one stable, exportable trust anchor.
+
+
 ## Accessing local apps (kind)
-kind has no LoadBalancer and the local ingress is a Traefik **ClusterIP**, so reach it
-from the host with these `cluster.just` primitives — they port-forward Traefik's
-**443** (websecure, self-signed cert) and resolve the real hostname to it, so you use
-normal URLs:
+**Use the real URL. Any tool. No routing flags.** The local cluster publishes its
+Traefik ingress on the host's real `:80`/`:443` (kind `extraPortMappings` → a NodePort
+Service), and `local.dantofa.dev` + `*.local.dantofa.dev` resolve to `127.0.0.1` via a
+wildcard DNS record. So `${base_domain}/myapp` works from curl, a browser, Playwright,
+an HTTP client in a test, or any CLI you happen to be holding — nothing has to be told
+where the cluster is, and there is no port-forward to babysit:
 
-- `just cluster local curl https://${base_domain}/myapp` — curl (adds `--connect-to` +
-  `--insecure`).
-- `just cluster local chromium https://${base_domain}/myapp` — interactive Chromium.
-- `just cluster local playwright test` — Playwright. Your `playwright.config` reads the
-  exported `HOST_RESOLVER_RULES` into `launchOptions.args` and sets
-  `baseURL: https://${base_domain}`; pin `@playwright/test` to the flake's
-  `playwright-driver` version. Chromium/Node/Playwright browsers ship in the flake.
+```
+curl http://${base_domain}/myapp
+```
 
-Env knobs: `INGRESS_PORT` (default 18443), `CHROMIUM`, `PLAYWRIGHT`.
+Your app needs no DNS work either: declare an Ingress for `<app>.${base_domain}` (or a
+path on `${base_domain}`) and the wildcard record already points at it.
+
+### TLS: export the local CA once, then point tools at it
+
+The local cluster runs its **own CA**. cert-manager mints a self-signed root
+(`local-ca`, in `flux/local/ca`) and issues Traefik's default cert from it with the
+real SANs — `local.dantofa.dev` and `*.local.dantofa.dev`. Unlike a stock Traefik
+cert, this one can actually be **verified** rather than only ignored.
+
+Export the trust anchor once per cluster:
+
+```
+just cluster local ca      # writes ./.local-ca.pem and prints the exports
+export SSL_CERT_FILE=$PWD/.local-ca.pem CURL_CA_BUNDLE=$PWD/.local-ca.pem \
+       NODE_EXTRA_CA_CERTS=$PWD/.local-ca.pem
+```
+
+Re-run it after recreating the cluster — the CA is minted per cluster, so a fresh
+cluster means a fresh anchor. Leaf certs rotating (every 90d) does **not** stale it.
+
+**How each stack consumes the anchor.** The env vars cover a lot, but not
+everything — some stacks ignore them and need an explicit argument. Verified against
+a live local cluster:
+
+| Tool / runtime | How it takes the CA |
+| --- | --- |
+| curl | `SSL_CERT_FILE` **or** `CURL_CA_BUNDLE` (both work) |
+| Go `net/http` | `SSL_CERT_FILE` |
+| Node `fetch` / undici | `NODE_EXTRA_CA_CERTS` |
+| openssl `s_client` | `-CAfile <pem>` |
+| wget | `--ca-certificate=<pem>` — it does **not** read `SSL_CERT_FILE` |
+| Python stdlib (`urllib`, `http.client`) | explicit `ssl.create_default_context(cafile=…)` — it reads **neither** `SSL_CERT_FILE` nor `REQUESTS_CA_BUNDLE`, because `create_default_context()` loads the system bundle |
+| Python `requests` | `REQUESTS_CA_BUNDLE` (or `verify="<pem>"`) |
+| Python `httpx` | `verify="<pem>"` |
+| git | `GIT_SSL_CAINFO` |
+
+So: set the three env vars for the stacks that honour them, and pass the PEM
+explicitly in Python and wget. Either way there is **one anchor** — no per-tool
+trust configuration beyond naming the same file.
+
+**Plain `http://` still needs nothing at all.** Vanilla Ingresses (no `tls:` block)
+serve on the `web` (:80) entrypoint, so `http://${base_domain}/...` skips TLS
+entirely. Prefer it unless you are testing something TLS-specific.
+
+**Browsers are the exception.** Chromium uses its own NSS store and ignores all of
+the above. Either import the CA once:
+
+```
+certutil -d sql:$HOME/.pki/nssdb -A -t 'C,,' -n dantofa-local -i .local-ca.pem
+```
+
+or keep using `--ignore-certificate-errors` / Playwright's `ignoreHTTPSErrors: true`.
+
+**Fallback — skipping verification.** If you have not exported the CA (or are in a
+throwaway shell), every stack has a skip-verify switch:
+
+| Tool / runtime | How to skip verification |
+| --- | --- |
+| curl | `-k` / `--insecure` |
+| wget | `--no-check-certificate` |
+| HTTPie | `--verify=no` |
+| Python `requests` / `httpx` | `verify=False` |
+| Python `urllib` | `context=ssl._create_unverified_context()` |
+| Node `fetch` / undici | `NODE_TLS_REJECT_UNAUTHORIZED=0` (process-wide; no per-request option) |
+| Node `axios` | `httpsAgent: new https.Agent({ rejectUnauthorized: false })` |
+| Go `net/http` | `&http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}` |
+| Chromium / Chrome | `--ignore-certificate-errors` |
+| Playwright | `ignoreHTTPSErrors: true` (context or `playwright.config`) |
+| Puppeteer | `acceptInsecureCerts: true` (older: `ignoreHTTPSErrors: true`) |
+| grpcurl | `-insecure` |
+| k6 | `insecureSkipTLSVerify: true` |
+| git | `GIT_SSL_NO_VERIFY=1` |
+
+**Scope — local only.** The CA and these flags belong to the local cluster. Never let
+either reach a config path that also runs against **preview or production** (both get
+real Let's Encrypt certs, where a skip-verify flag would silently mask a broken
+chain). Keep them in a local-only profile or on the command line — not in shared
+client config or the default test setup.
+
+### Convenience wrappers
+
+Thin — they add the cert flag and nothing else. Calling the tool directly is equally
+fine:
+
+- `just cluster local curl https://${base_domain}/myapp` — curl with `--insecure`.
+- `just cluster local chromium https://${base_domain}/myapp` — Chromium with the cert
+  flag and a throwaway profile.
+- `just cluster local playwright test` — exports `BASE_URL`; set
+  `baseURL: process.env.BASE_URL` and `ignoreHTTPSErrors: true` in your
+  `playwright.config`, and pin `@playwright/test` to the flake's `playwright-driver`.
+
+Env knobs: `CHROMIUM`, `PLAYWRIGHT`.
+
+**Caveat — in-cluster callers.** The DNS record answers `127.0.0.1` for everyone,
+including pods. A pod calling `https://${base_domain}/...` hits *its own* loopback,
+not the ingress. From inside the cluster, call the Service directly
+(`http://<svc>.<ns>.svc.cluster.local`) rather than the public hostname.
 
 ## Logging
 Automatic. Alloy tails every pod's stdout/stderr → local Loki (and Grafana Cloud when

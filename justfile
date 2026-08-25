@@ -141,9 +141,11 @@ sast:
 # Full local (kind) e2e for the PLATFORM itself -- the platform's own compose recipe
 # over the shared `cluster local` primitives, adding the platform self-test: echo
 # reachable at /echo through the local Traefik ingress, with no Cloudflare/tunnel in
-# the path, so traffic stays on the loopback (no WAN round-trip / 520 flakiness). It
-# port-forwards Traefik and resolves the real ${base_domain} to the forwarded port --
-# the same mechanism a `curl --resolve` / Playwright `--host-resolver-rules` run uses.
+# the path, so traffic stays on the loopback (no WAN round-trip / 520 flakiness).
+# There is no port-forward and no --resolve: the cluster publishes its ingress on the
+# host's real :80/:443 (kind extraPortMappings -> Traefik NodePort) and
+# ${base_domain} resolves to 127.0.0.1 via a wildcard DNS record, so the probe is a
+# plain curl of the real URL -- exactly what any other tool would do.
 # Requires the dev shell (kind/flux/kubectl/curl/jq/bws on PATH) and BWS_* in the
 # environment (for the ESO secret-zero). Uses bash-local vars (not just-interpolation)
 # so `just shellcheck` still lints it. A failed run leaves the cluster up for
@@ -152,25 +154,17 @@ local-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
   base_domain=local.dantofa.dev
-  port=18080
   just cluster local create
   just cluster local verify
   export KUBECONFIG=.kubeconfig
-  # Reach the in-cluster Traefik from the host: port-forward it (kind has no
-  # LoadBalancer) and resolve the real hostname to the forwarded port, so echo is
-  # served over its normal Ingress with nothing external in the path.
   echo "Waiting for Traefik to be ready..."
   kubectl -n traefik rollout status deploy/traefik --timeout=180s
-  kubectl -n traefik port-forward svc/traefik "${port}:80" >/dev/null 2>&1 &
-  pf=$!
-  trap 'kill "${pf}" 2>/dev/null || true' EXIT
-  sleep 2
-  url="http://${base_domain}:${port}/echo"
-  echo "Probing ${url} via local ingress (resolving ${base_domain} -> 127.0.0.1)..."
+  url="http://${base_domain}/echo"
+  echo "Probing ${url} via the local ingress on the host's real port..."
   retries=12
   sleep=5
   for i in $(seq 1 "$retries"); do
-    if body="$(curl -fsS --max-time 8 --resolve "${base_domain}:${port}:127.0.0.1" "$url")" \
+    if body="$(curl -fsS --max-time 8 "$url")" \
       && printf '%s' "$body" | grep -q "$base_domain"; then
       echo "e2e OK: echo reachable via ${url}"
       break
@@ -182,8 +176,6 @@ local-e2e:
     echo "attempt ${i}/${retries}: not ready, retrying in ${sleep}s..."
     sleep "$sleep"
   done
-  kill "${pf}" 2>/dev/null || true
-  trap - EXIT
   just cluster local delete
 
 # Print how many non-deleted Cloudflare Tunnels are named <name> (via the bws

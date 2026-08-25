@@ -1,0 +1,12 @@
+---
+# The issuer every local ingress cert comes from, backed by the `local-ca` root
+# minted in certificate.yaml. Cluster-scoped so a Certificate in any namespace
+# (traefik's default cert today, a downstream app's own cert tomorrow) can name it
+# and land under the same exported trust anchor.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: local-ca
+spec:
+  ca:
+    secretName: local-ca

@@ -32,6 +32,51 @@ const (
 	RegistryInClusterPort = 5000
 )
 
+// Ingress publishing. A local cluster puts its ingress on the host's REAL ports,
+// so a bootstrapped cluster answers at its real URL (http://<base-domain>/… and
+// https://<base-domain>/…) with nothing in the path — no `kubectl port-forward`,
+// no per-tool resolver flags. The DNS side is a wildcard A record pointing the
+// base domain at the loopback; these mappings put Traefik behind it.
+//
+// Deliberately fixed, not caller-configurable: a non-default host port would put
+// a `:8443` back into every URL, which is the exact wart this removes. The cost is
+// that only one local cluster can hold the ports at a time — the second `create`
+// fails loudly on the port bind rather than coming up subtly unreachable.
+const (
+	// IngressHTTPHostPort / IngressHTTPSHostPort are the host ports published on
+	// the loopback. IngressHTTPNodePort / IngressHTTPSNodePort are the Traefik
+	// Service nodePorts they map onto — these MUST match the nodePorts pinned in
+	// flux/local/traefik/release.yaml, which is the other half of this contract.
+	IngressHTTPHostPort  = 80
+	IngressHTTPNodePort  = 30080
+	IngressHTTPSHostPort = 443
+	IngressHTTPSNodePort = 30443
+	// IngressListenAddress binds the published ports to the loopback only. The
+	// DNS answer is 127.0.0.1, so binding the wildcard address would expose the
+	// dev cluster on the LAN for no benefit.
+	IngressListenAddress = "127.0.0.1"
+)
+
+// IngressPortMapping is one host-port → node-port publication of the local
+// ingress: the neutral spec the kind adapter renders as an `extraPortMappings`
+// entry (keeping the kind config format out of core).
+type IngressPortMapping struct {
+	// HostPort is the port bound on IngressListenAddress on the developer's host.
+	HostPort int
+	// NodePort is the Traefik Service nodePort inside the cluster it maps onto.
+	NodePort int
+}
+
+// IngressPortMappings returns the host→node publications every local cluster
+// gets. A NodePort Service answers on every node, so the caller only needs to
+// attach these to one node.
+func IngressPortMappings() []IngressPortMapping {
+	return []IngressPortMapping{
+		{HostPort: IngressHTTPHostPort, NodePort: IngressHTTPNodePort},
+		{HostPort: IngressHTTPSHostPort, NodePort: IngressHTTPSNodePort},
+	}
+}
+
 // InClusterArtifactURL is the oci:// URL an in-cluster OCIRepository uses to pull
 // the artifact `PushArtifact` publishes (without the tag). It resolves the
 // registry's IP on the kind network: cluster DNS (CoreDNS) cannot resolve the
