@@ -1,6 +1,6 @@
 {
   "name": "dantofa-platform-cluster",
-  "description": "dantofa platform cluster-ops for downstream projects: dctl + the CLI toolchain on PATH, and the cluster.just module + base .trivyignore materialized into ./.just for `import`. See https://github.com/dantofa/platform.",
+  "description": "dantofa k8s platform",
   "packages": [
     "github:dantofa/platform#default",
     "github:dantofa/platform#cluster-toolchain",
@@ -16,7 +16,7 @@
   },
   "shell": {
     "init_hook": [
-      "for p in '.just/' '.claude/skills/dantofa-platform/' '.devbox/' '.claude/settings.local.json'; do command grep -qxF \"$p\" .gitignore 2>/dev/null || printf '%s\\n' \"$p\" >> .gitignore; done",
+      "for p in '.just/' '.claude/skills/dantofa-platform/' '.devbox/' '.claude/settings.local.json' '.local-ca.pem'; do command grep -qxF \"$p\" .gitignore 2>/dev/null || printf '%s\\n' \"$p\" >> .gitignore; done",
       "mkdir -p .just",
       "install -m 0644 \"$DEVBOX_PACKAGES_DIR/cluster.just\" .just/cluster.just",
       "install -m 0644 \"$DEVBOX_PACKAGES_DIR/trivyignore-cluster\" .just/.trivyignore-base",
