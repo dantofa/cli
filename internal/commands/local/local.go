@@ -181,13 +181,27 @@ func newLocalBootstrapCmd() *cobra.Command {
 					DependsOn:  []string{fluxcore.LocalRequirementsRootName},
 					Substitute: true,
 				},
-				// Ingress layer: local Traefik on a ClusterIP Service, reached from
-				// the host by port-forward (no Cloudflare/tunnel, so no bws token —
-				// hence no eso-config dependency). Serves the same vanilla Ingresses
-				// as DOKS via the default IngressClass.
+				// Local CA layer: a cert-manager-minted self-signed root plus the
+				// local-ca ClusterIssuer the ingress cert is issued from. Waits on
+				// cert-manager-config, which ships the `selfsigned` ClusterIssuer that
+				// mints the root (and the Certificate CRD itself). No ${...}
+				// placeholders, so it carries no substitution.
+				{
+					Name:      fluxcore.LocalCARootName,
+					Path:      fluxcore.DefaultLocalCAPath,
+					DependsOn: []string{fluxcore.CertManagerConfigName},
+				},
+				// Ingress layer: local Traefik on a NodePort Service that kind
+				// publishes to the host's real :80/:443 (no Cloudflare/tunnel, so no
+				// bws token — hence no eso-config dependency). Serves the same
+				// vanilla Ingresses as DOKS via the default IngressClass. Waits on
+				// local-ca: its default-cert Certificate names that ClusterIssuer, and
+				// cert-manager fails the CertificateRequest IssuerNotFound if the
+				// issuer is not there when the Certificate is applied.
 				{
 					Name:       fluxcore.IngressRootName,
 					Path:       fluxcore.DefaultLocalIngressPath,
+					DependsOn:  []string{fluxcore.LocalCARootName},
 					Substitute: true,
 				},
 				// Echo test backend, deployed on kind by default. After the ingress

@@ -4,6 +4,7 @@
 #   just cluster debug                              # snapshot cluster + Flux state
 #   just cluster verify backup|restore|image-scan   # verify platform infra
 #   just cluster local  create|verify|delete|test   # kind cluster lifecycle
+#   just cluster local  ca                          # export the local TLS trust anchor
 #
 # Distributed via the platform Nix flake (`packages.cluster-just`): the platform
 # imports it directly; a downstream repo materializes it (flake output / the devbox
@@ -16,6 +17,7 @@
 #   DCTL              how to invoke dctl (default: `nix run github:dantofa/platform#default --`)
 #   BASE_DOMAIN       ingress FQDN for `cluster local` (default: local.dantofa.dev)
 #   KUBECONFIG        kubeconfig path (default: ./.kubeconfig)
+#   LOCAL_CA_FILE     where `cluster local ca` writes the trust anchor (default: ./.local-ca.pem)
 #   TRIVYIGNORE_BASE  mandatory accepted-CVE file (default: ./.trivyignore-cluster)
 #   TRIVYIGNORE_LOCAL optional extra accepted-CVE file (default: ./.trivyignore-cluster)
 
@@ -260,101 +262,76 @@ cluster-local-delete *args:
 # Consumers wanting an app-inclusive e2e write their own recipe composing these.
 cluster-local-test: cluster-local-create cluster-local-verify && cluster-local-delete
 
-# (private) Print the unique Ingress hostnames on the local cluster, one per line. The
-# error-prone extraction kept in one place, arg-free so `just shellcheck` lints it.
-# Config via env: ${KUBECONFIG:-.kubeconfig}.
-[private]
-cluster-local-ingress-hosts:
+# Export the local cluster's CA (the trust anchor cert-manager mints, from which
+# Traefik's default cert is issued) to a file, and print how to point tools at it.
+# This is what replaces per-tool skip-verify flags: one anchor, understood by every
+# OpenSSL/Go/Python/Node HTTP stack via the standard CA-bundle env vars. Re-run it
+# after recreating the cluster -- the CA is minted per cluster, so a fresh cluster
+# means a fresh anchor. Config: ${KUBECONFIG:-.kubeconfig}, ${LOCAL_CA_FILE:-.local-ca.pem}.
+cluster-local-ca:
   #!/usr/bin/env bash
   set -euo pipefail
   export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
-  hosts="$(kubectl get ingress -A -o jsonpath='{range .items[*]}{range .spec.rules[*]}{.host}{"\n"}{end}{end}' | sort -u | sed '/^$/d')"
-  if [ -z "$hosts" ]; then
-    echo "no Ingress hosts found -- is the local cluster bootstrapped?" >&2
+  out="${LOCAL_CA_FILE:-.local-ca.pem}"
+  # The CA Certificate is minted asynchronously after the cluster reconciles, so
+  # give it a moment on a freshly-bootstrapped cluster rather than failing hard.
+  for _ in $(seq 1 30); do
+    if kubectl -n cert-manager get secret local-ca >/dev/null 2>&1; then break; fi
+    sleep 2
+  done
+  if ! kubectl -n cert-manager get secret local-ca >/dev/null 2>&1; then
+    echo "no local-ca secret in the cert-manager namespace -- is the cluster bootstrapped?" >&2
     exit 1
   fi
-  printf '%s\n' "$hosts"
+  kubectl -n cert-manager get secret local-ca -o jsonpath='{.data.tls\.crt}' | base64 -d > "$out"
+  if [ ! -s "$out" ]; then
+    echo "local-ca secret held no certificate" >&2
+    exit 1
+  fi
+  abs="$(cd "$(dirname "$out")" && pwd)/$(basename "$out")"
+  echo "local CA written to $abs"
+  echo
+  echo "Trust it for every tool in this shell:"
+  echo "  export SSL_CERT_FILE=$abs CURL_CA_BUNDLE=$abs REQUESTS_CA_BUNDLE=$abs NODE_EXTRA_CA_CERTS=$abs GIT_SSL_CAINFO=$abs"
+  echo
+  echo "Browsers use their own store; import once with:"
+  echo "  certutil -d sql:\$HOME/.pki/nssdb -A -t 'C,,' -n dantofa-local -i $abs"
 
-# (private) Chromium --host-resolver-rules mapping every Ingress host to the forwarded
-# Traefik port, e.g. "MAP local.dantofa.dev 127.0.0.1:18443". Config: ${INGRESS_PORT:-18443}.
-[private]
-cluster-local-resolver-rules:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  port="${INGRESS_PORT:-18443}"
-  just cluster-local-ingress-hosts | sed "s#.*#MAP & 127.0.0.1:${port}#" | paste -sd, -
-
-# (private) curl --connect-to args sending every Ingress host (:443) to the forwarded
-# Traefik port, e.g. "--connect-to local.dantofa.dev:443:127.0.0.1:18443" -- the curl
-# analogue of the resolver rules (redirects host+port, so the real URLs still work).
-# Config: ${INGRESS_PORT:-18443}.
-[private]
-cluster-local-connect-to:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  port="${INGRESS_PORT:-18443}"
-  just cluster-local-ingress-hosts | sed "s#.*#--connect-to &:443:127.0.0.1:${port}#" | paste -sd' ' -
-
-# Launch Chromium wired to the local cluster's ingress: port-forward the local Traefik
-# and map every Ingress host to it via --host-resolver-rules, so the real hostnames
-# (e.g. local.dantofa.dev) resolve to the loopback with no DNS/tunnel. `*args` pass
-# through to Chromium (e.g. a URL to open). A fresh --user-data-dir forces a new
-# instance so the flags apply even if Chromium is already running. Assumes a
-# bootstrapped local cluster. Config: ${CHROMIUM:-chromium}, ${INGRESS_PORT:-18443}.
+# Launch Chromium against the local cluster. The cluster publishes its ingress on
+# the host's real :80/:443 and ${BASE_DOMAIN} resolves to 127.0.0.1, so the real URL
+# just works — this recipe only adds what is still cluster-specific: trusting the
+# self-signed Traefik cert, and a fresh --user-data-dir so the flags apply even when
+# Chromium is already running. `*args` pass through (e.g. a URL to open). Assumes a
+# bootstrapped local cluster. Config: ${CHROMIUM:-chromium}.
 cluster-local-chromium *args:
   #!/usr/bin/env bash
   set -euo pipefail
-  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
-  port="${INGRESS_PORT:-18443}"
-  rules="$(just cluster-local-resolver-rules)"
-  kubectl -n traefik port-forward svc/traefik "${port}:443" >/dev/null 2>&1 &
-  pf=$!
-  trap 'kill "${pf}" 2>/dev/null || true' EXIT
-  sleep 2
   # shellcheck disable=SC2206
   chromium=(${CHROMIUM:-chromium})
-  "${chromium[@]}" --host-resolver-rules="$rules" --ignore-certificate-errors --user-data-dir="$(mktemp -d)" {{args}}
+  "${chromium[@]}" --ignore-certificate-errors --user-data-dir="$(mktemp -d)" {{args}}
 
-# Run Playwright wired to the local cluster's ingress: port-forward the local Traefik
-# and export the --host-resolver-rules mapping as HOST_RESOLVER_RULES for your
-# playwright.config to apply to the browser launch args, e.g.:
-#   launchOptions: { args: process.env.HOST_RESOLVER_RULES
-#     ? [`--host-resolver-rules=${process.env.HOST_RESOLVER_RULES}`, '--ignore-certificate-errors'] : [] }
-# then set baseURL to your real ${BASE_DOMAIN} (it resolves to the loopback). `*args`
-# pass through to Playwright (e.g. `test`). Assumes a bootstrapped local cluster.
-# Config: ${PLAYWRIGHT:-npx playwright}, ${INGRESS_PORT:-18443}.
+# Run Playwright against the local cluster. Nothing has to be injected into the
+# browser any more (the real URL resolves and connects on its own) — set
+# `baseURL: https://${BASE_DOMAIN}` and `ignoreHTTPSErrors: true` in your
+# playwright.config and run Playwright directly; this recipe just exports BASE_URL
+# for a config that reads it. Pin @playwright/test to the flake's playwright-driver.
+# `*args` pass through (e.g. `test`). Config: ${PLAYWRIGHT:-npx playwright}.
 cluster-local-playwright *args:
   #!/usr/bin/env bash
   set -euo pipefail
-  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
-  port="${INGRESS_PORT:-18443}"
-  HOST_RESOLVER_RULES="$(just cluster-local-resolver-rules)"
-  export HOST_RESOLVER_RULES
-  kubectl -n traefik port-forward svc/traefik "${port}:443" >/dev/null 2>&1 &
-  pf=$!
-  trap 'kill "${pf}" 2>/dev/null || true' EXIT
-  sleep 2
+  BASE_URL="https://${BASE_DOMAIN:-local.dantofa.dev}"
+  export BASE_URL
   # shellcheck disable=SC2206
   playwright=(${PLAYWRIGHT:-npx playwright})
   "${playwright[@]}" {{args}}
 
-# curl the local cluster ingress: port-forward the local Traefik and use --connect-to
-# to send requests for every Ingress host (:443) to it, so you curl the real URLs
-# (e.g. https://local.dantofa.dev/echo) with nothing external in the path -- the curl
-# analogue of the local-chromium/playwright recipes. `*args` pass through to curl (the
-# URL + any flags). Assumes a bootstrapped local cluster. Config: ${INGRESS_PORT:-18443}.
+# curl the local cluster ingress at its real URL. Only --insecure is still needed
+# (Traefik serves a self-signed cert locally); resolution and routing need nothing.
+# `*args` pass through (the URL + any flags). Assumes a bootstrapped local cluster.
 cluster-local-curl *args:
   #!/usr/bin/env bash
   set -euo pipefail
-  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
-  port="${INGRESS_PORT:-18443}"
-  # shellcheck disable=SC2207
-  connect=($(just cluster-local-connect-to))
-  kubectl -n traefik port-forward svc/traefik "${port}:443" >/dev/null 2>&1 &
-  pf=$!
-  trap 'kill "${pf}" 2>/dev/null || true' EXIT
-  sleep 2
-  curl --insecure "${connect[@]}" {{args}}
+  curl --insecure {{args}}
 
 # Snapshot cluster + Flux state into ./preview-diagnostics for CI to upload as
 # artifacts on a failed run (the cluster is destroyed afterwards, so this is the

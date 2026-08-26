@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	localcore "github.com/dantofa/platform/internal/core/local"
 )
 
 // The registry answers on :5000 inside its container; the host maps a chosen
@@ -25,7 +27,10 @@ const (
 // `workers` worker nodes (kind adds a load balancer node automatically when
 // there is more than one control-plane). containerdConfigPatches enables the
 // per-registry config directory so the mirror hosts.toml the recipe drops on
-// each node is honoured.
+// each node is honoured. It also publishes the ingress on the host's real ports
+// (localcore.IngressPortMappings) — the mechanical render of that neutral spec
+// into kind's extraPortMappings format, which is why the ports themselves live
+// in core and not here.
 func kindConfig(controlPlanes, workers int) string {
 	var b strings.Builder
 	b.WriteString(`kind: Cluster
@@ -36,8 +41,21 @@ containerdConfigPatches:
       config_path = "/etc/containerd/certs.d"
 nodes:
 `)
-	for range controlPlanes {
+	for i := range controlPlanes {
 		b.WriteString("  - role: control-plane\n")
+		// Attach the ingress publications to the first control-plane node only. A
+		// NodePort Service answers on every node, so one node's mappings serve the
+		// whole cluster however many nodes it has — and kind rejects the same host
+		// port claimed twice.
+		if i == 0 {
+			b.WriteString("    extraPortMappings:\n")
+			for _, m := range localcore.IngressPortMappings() {
+				fmt.Fprintf(&b, "      - containerPort: %d\n", m.NodePort)
+				fmt.Fprintf(&b, "        hostPort: %d\n", m.HostPort)
+				fmt.Fprintf(&b, "        listenAddress: %q\n", localcore.IngressListenAddress)
+				b.WriteString("        protocol: TCP\n")
+			}
+		}
 	}
 	for range workers {
 		b.WriteString("  - role: worker\n")
