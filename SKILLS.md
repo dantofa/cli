@@ -19,6 +19,7 @@ so **do not rebuild what the platform already provides**. This skill is the map:
 your task to a section, follow the convention, reuse the primitive.
 
 ## What the platform already provides (never duplicate these)
+
 - **Provisioning**: `dctl` creates DOKS + local (kind) clusters, installs Flux, and
   reconciles the shared base stack.
 - **Base stacks on every cluster**: cert-manager, External Secrets Operator (ESO),
@@ -39,18 +40,24 @@ cert-manager, no bespoke log/metric shipping. Emit signals the standard way and 
 platform collects them.
 
 ## Project setup (devbox plugin)
+
 Add the platform's **devbox plugin** (`github:dantofa/platform`) to your `devbox.json`.
 It puts `dctl` + the CLI toolchain on `PATH` and, on every `devbox` shell init,
 **materializes generated files into the project tree**, rev-pinned to the platform
 version by `devbox.lock`:
+
 - `.just/cluster.just` + `.just/.trivyignore-base` — the shared cluster-ops module your
-  justfile `import`s.
+  justfile `import`s. The hook also **ensures that import exists**: it creates a
+  `justfile` if your project has none, or appends the import if it has one (matching on
+  the import path, so a variant you wrote yourself is left alone). Idempotent, like the
+  `.gitignore` entries.
 - `.claude/skills/dantofa-platform/SKILL.md` — this skill (Claude Code auto-loads it).
 
 Because they are **regenerated every init and pinned by `devbox.lock`**, they are build
 output: **don't commit them** — a committed copy silently drifts from the pin. You don't
 have to manage this by hand: the plugin's `init_hook` **adds their ignore entries to your
 `.gitignore` for you** (idempotent, append-if-missing). Commit the pin, not its output.
+
 - **Commit**: `.gitignore` (now carrying those entries), `devbox.json`, `devbox.lock`.
 - **Plugin-managed ignores**: `.just/`, `.claude/skills/dantofa-platform/`, `.devbox/`,
   `.claude/settings.local.json`.
@@ -59,6 +66,7 @@ have to manage this by hand: the plugin's `init_hook` **adds their ignore entrie
   `.claude/skills/<name>/` stays committable.
 
 ## Domain conventions
+
 - Every cluster has a `base_domain` (Flux cluster-var `${base_domain}`) — e.g.
   `local.dantofa.dev`, `preview.dantofa.dev`, `dantofa.dev`.
 - **Route apps by PATH on `${base_domain}`, not per-app subdomains**: serve your app at
@@ -68,6 +76,7 @@ have to manage this by hand: the plugin's `init_hook` **adds their ignore entrie
 - Never hardcode a hostname — use `${base_domain}` + a path.
 
 ## Ingress definitions
+
 Plain `networking.k8s.io/v1` Ingress, **omitting `ingressClassName`** so the cluster's
 default IngressClass routes it — one manifest works on every cluster type. Use
 `host: ${base_domain}` (Flux substitutes it), a `/<app>` path prefix, and **no `tls:`
@@ -94,6 +103,7 @@ spec:
 ```
 
 ## Flux GitOps conventions
+
 - The platform reconciles from ONE source (a `GitRepository` on DOKS, an
   `OCIRepository` on kind), registered at bootstrap. Downstream layers its **own
   payload** as an additional reconcile root pointed at the same source.
@@ -111,6 +121,7 @@ spec:
   `standard` on kind), never a hardcoded class.
 
 ## Cluster lifecycle
+
 Use `dctl` directly, or the shared `cluster.just` module — import it (materialized to
 `.just/cluster.just` by the devbox plugin, or the flake output `packages.cluster-just`)
 and compose YOUR own end-to-end flow over its primitives (the module never calls back
@@ -133,24 +144,24 @@ A downstream e2e is your own recipe: `create → deploy your app → test → de
 ### Which TLS issuer applies where
 
 `--tls-issuer` is a **DOKS-only** flag, and even there it only takes effect with
-`--dolb` — it names the issuer of the *Traefik default cert*, and without a
+`--dolb` — it names the issuer of the _Traefik default cert_, and without a
 LoadBalancer ingress there is no such cert to issue. It defaults to `selfsigned`.
 
-| Cluster shape | What signs the cert clients see | `--tls-issuer` | What a client must do |
-| --- | --- | --- | --- |
-| **kind (local)** | `local-ca` — a cert-manager CA minted in-cluster | not accepted | export the CA (`just cluster local ca`), or use `http://` |
-| **DOKS, default (Cloudflare Tunnel)** | Cloudflare's edge cert (publicly trusted) | **ignored** — warns if set to a non-default | nothing |
-| **DOKS `--dolb`, preview** | cert-manager `selfsigned` ClusterIssuer, behind Cloudflare **Full** | `selfsigned` (default) | nothing — the edge does not verify the origin cert |
-| **DOKS `--dolb`, production** | Let's Encrypt via Cloudflare DNS-01, behind Cloudflare **Full strict** | `letsencrypt` | nothing — publicly trusted |
-| **DOKS `--dolb`, ACME dry-run** | Let's Encrypt **staging** CA via DNS-01 | `staging` | trust the LE staging root — staging certs are *not* publicly trusted |
+| Cluster shape                         | What signs the cert clients see                                        | `--tls-issuer`                              | What a client must do                                                |
+| ------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------- |
+| **kind (local)**                      | `local-ca` — a cert-manager CA minted in-cluster                       | not accepted                                | export the CA (`just cluster local ca`), or use `http://`            |
+| **DOKS, default (Cloudflare Tunnel)** | Cloudflare's edge cert (publicly trusted)                              | **ignored** — warns if set to a non-default | nothing                                                              |
+| **DOKS `--dolb`, preview**            | cert-manager `selfsigned` ClusterIssuer, behind Cloudflare **Full**    | `selfsigned` (default)                      | nothing — the edge does not verify the origin cert                   |
+| **DOKS `--dolb`, production**         | Let's Encrypt via Cloudflare DNS-01, behind Cloudflare **Full strict** | `letsencrypt`                               | nothing — publicly trusted                                           |
+| **DOKS `--dolb`, ACME dry-run**       | Let's Encrypt **staging** CA via DNS-01                                | `staging`                                   | trust the LE staging root — staging certs are _not_ publicly trusted |
 
 Note that `selfsigned` and the local `local-ca` are not the same mechanism, despite
 both being self-signed in origin: `selfsigned` issues a self-signed **leaf** (fine
 behind Cloudflare Full, which does not verify the origin), while `local-ca` mints a
 **CA** whose leaves rotate under one stable, exportable trust anchor.
 
-
 ## Accessing local apps (kind)
+
 **Use the real URL. Any tool. No routing flags.** The local cluster publishes its
 Traefik ingress on the host's real `:80`/`:443` (kind `extraPortMappings` → a NodePort
 Service), and `local.dantofa.dev` + `*.local.dantofa.dev` resolve to `127.0.0.1` via a
@@ -175,9 +186,9 @@ cert, this one can actually be **verified** rather than only ignored.
 Export the trust anchor once per cluster:
 
 ```
-just cluster local ca      # writes ./.local-ca.pem and prints the exports
-export SSL_CERT_FILE=$PWD/.local-ca.pem CURL_CA_BUNDLE=$PWD/.local-ca.pem \
-       NODE_EXTRA_CA_CERTS=$PWD/.local-ca.pem
+just cluster local ca      # writes ./.local.pem and prints the exports
+export SSL_CERT_FILE=$PWD/.local.pem CURL_CA_BUNDLE=$PWD/.local.pem \
+       NODE_EXTRA_CA_CERTS=$PWD/.local.pem
 ```
 
 Re-run it after recreating the cluster — the CA is minted per cluster, so a fresh
@@ -187,17 +198,17 @@ cluster means a fresh anchor. Leaf certs rotating (every 90d) does **not** stale
 everything — some stacks ignore them and need an explicit argument. Verified against
 a live local cluster:
 
-| Tool / runtime | How it takes the CA |
-| --- | --- |
-| curl | `SSL_CERT_FILE` **or** `CURL_CA_BUNDLE` (both work) |
-| Go `net/http` | `SSL_CERT_FILE` |
-| Node `fetch` / undici | `NODE_EXTRA_CA_CERTS` |
-| openssl `s_client` | `-CAfile <pem>` |
-| wget | `--ca-certificate=<pem>` — it does **not** read `SSL_CERT_FILE` |
+| Tool / runtime                          | How it takes the CA                                                                                                                                                         |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| curl                                    | `SSL_CERT_FILE` **or** `CURL_CA_BUNDLE` (both work)                                                                                                                         |
+| Go `net/http`                           | `SSL_CERT_FILE`                                                                                                                                                             |
+| Node `fetch` / undici                   | `NODE_EXTRA_CA_CERTS`                                                                                                                                                       |
+| openssl `s_client`                      | `-CAfile <pem>`                                                                                                                                                             |
+| wget                                    | `--ca-certificate=<pem>` — it does **not** read `SSL_CERT_FILE`                                                                                                             |
 | Python stdlib (`urllib`, `http.client`) | explicit `ssl.create_default_context(cafile=…)` — it reads **neither** `SSL_CERT_FILE` nor `REQUESTS_CA_BUNDLE`, because `create_default_context()` loads the system bundle |
-| Python `requests` | `REQUESTS_CA_BUNDLE` (or `verify="<pem>"`) |
-| Python `httpx` | `verify="<pem>"` |
-| git | `GIT_SSL_CAINFO` |
+| Python `requests`                       | `REQUESTS_CA_BUNDLE` (or `verify="<pem>"`)                                                                                                                                  |
+| Python `httpx`                          | `verify="<pem>"`                                                                                                                                                            |
+| git                                     | `GIT_SSL_CAINFO`                                                                                                                                                            |
 
 So: set the three env vars for the stacks that honour them, and pass the PEM
 explicitly in Python and wget. Either way there is **one anchor** — no per-tool
@@ -211,7 +222,7 @@ entirely. Prefer it unless you are testing something TLS-specific.
 the above. Either import the CA once:
 
 ```
-certutil -d sql:$HOME/.pki/nssdb -A -t 'C,,' -n dantofa-local -i .local-ca.pem
+certutil -d sql:$HOME/.pki/nssdb -A -t 'C,,' -n dantofa-local -i .local.pem
 ```
 
 or keep using `--ignore-certificate-errors` / Playwright's `ignoreHTTPSErrors: true`.
@@ -219,22 +230,22 @@ or keep using `--ignore-certificate-errors` / Playwright's `ignoreHTTPSErrors: t
 **Fallback — skipping verification.** If you have not exported the CA (or are in a
 throwaway shell), every stack has a skip-verify switch:
 
-| Tool / runtime | How to skip verification |
-| --- | --- |
-| curl | `-k` / `--insecure` |
-| wget | `--no-check-certificate` |
-| HTTPie | `--verify=no` |
-| Python `requests` / `httpx` | `verify=False` |
-| Python `urllib` | `context=ssl._create_unverified_context()` |
-| Node `fetch` / undici | `NODE_TLS_REJECT_UNAUTHORIZED=0` (process-wide; no per-request option) |
-| Node `axios` | `httpsAgent: new https.Agent({ rejectUnauthorized: false })` |
-| Go `net/http` | `&http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}` |
-| Chromium / Chrome | `--ignore-certificate-errors` |
-| Playwright | `ignoreHTTPSErrors: true` (context or `playwright.config`) |
-| Puppeteer | `acceptInsecureCerts: true` (older: `ignoreHTTPSErrors: true`) |
-| grpcurl | `-insecure` |
-| k6 | `insecureSkipTLSVerify: true` |
-| git | `GIT_SSL_NO_VERIFY=1` |
+| Tool / runtime              | How to skip verification                                                  |
+| --------------------------- | ------------------------------------------------------------------------- |
+| curl                        | `-k` / `--insecure`                                                       |
+| wget                        | `--no-check-certificate`                                                  |
+| HTTPie                      | `--verify=no`                                                             |
+| Python `requests` / `httpx` | `verify=False`                                                            |
+| Python `urllib`             | `context=ssl._create_unverified_context()`                                |
+| Node `fetch` / undici       | `NODE_TLS_REJECT_UNAUTHORIZED=0` (process-wide; no per-request option)    |
+| Node `axios`                | `httpsAgent: new https.Agent({ rejectUnauthorized: false })`              |
+| Go `net/http`               | `&http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}` |
+| Chromium / Chrome           | `--ignore-certificate-errors`                                             |
+| Playwright                  | `ignoreHTTPSErrors: true` (context or `playwright.config`)                |
+| Puppeteer                   | `acceptInsecureCerts: true` (older: `ignoreHTTPSErrors: true`)            |
+| grpcurl                     | `-insecure`                                                               |
+| k6                          | `insecureSkipTLSVerify: true`                                             |
+| git                         | `GIT_SSL_NO_VERIFY=1`                                                     |
 
 **Scope — local only.** The CA and these flags belong to the local cluster. Never let
 either reach a config path that also runs against **preview or production** (both get
@@ -257,18 +268,21 @@ fine:
 Env knobs: `CHROMIUM`, `PLAYWRIGHT`.
 
 **Caveat — in-cluster callers.** The DNS record answers `127.0.0.1` for everyone,
-including pods. A pod calling `https://${base_domain}/...` hits *its own* loopback,
+including pods. A pod calling `https://${base_domain}/...` hits _its own_ loopback,
 not the ingress. From inside the cluster, call the Service directly
 (`http://<svc>.<ns>.svc.cluster.local`) rather than the public hostname.
 
 ## Logging
+
 Automatic. Alloy tails every pod's stdout/stderr → local Loki (and Grafana Cloud when
 `--grafana-cloud`). **Just log to stdout/stderr** — no per-app log shipping, no
 sidecar. Logs are labelled by `cluster`/`env`; query them in Grafana Cloud (Loki).
 
 ## Metrics
+
 Cluster/node/pod metrics are collected automatically. Expose **your app's** metrics one
 of two ways (both auto-scraped by Alloy — do NOT deploy your own Prometheus):
+
 - A **`ServiceMonitor`/`PodMonitor`** (the prometheus-operator CRDs are installed) — the
   richer path (per-target relabeling, auth, metric filtering); or
 - **Annotation autodiscovery** on the pod:
@@ -276,9 +290,11 @@ of two ways (both auto-scraped by Alloy — do NOT deploy your own Prometheus):
   (path defaults to `/metrics`).
 
 ## Traces — REQUIRED
+
 Every app **must** emit **OpenTelemetry traces**. Send **OTLP** to the in-cluster Alloy
 receiver (the `applicationObservability` collector); it forwards traces → local Tempo
 (and Grafana Cloud), while app OTLP metrics/logs fan out to Prometheus/Loki.
+
 - Point your SDK at the alloy-receiver Service in the `monitoring` namespace — OTLP
   gRPC `:4317` or HTTP `:4318` (confirm the Service name with
   `kubectl -n monitoring get svc`; set `OTEL_EXPORTER_OTLP_ENDPOINT`).
@@ -287,6 +303,7 @@ receiver (the `applicationObservability` collector); it forwards traces → loca
   analytics are built on those span attributes, so they are not optional.
 
 ## Governance (tenant namespaces)
+
 Label your namespace `dantofa.dev/tenant: <app>` to opt into the platform's Kyverno
 baseline. It then **enforces** on your Pods: **restricted Pod Security** (run non-root,
 drop all capabilities, seccomp `RuntimeDefault`, no host namespaces/paths), **cpu +
@@ -295,6 +312,7 @@ memory requests and a memory limit** on every container, and **no `:latest`** im
 manifests to comply.
 
 ## Secrets
+
 Source-of-truth secrets (API tokens, credentials) come from **Bitwarden via ESO**: an
 `ExternalSecret` against the `bitwarden` ClusterSecretStore. Disposable, cluster-local
 secrets (e.g. a generated password) use the ESO `Password` generator — no Bitwarden

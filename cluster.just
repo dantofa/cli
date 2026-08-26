@@ -8,7 +8,7 @@
 #
 # Distributed via the platform Nix flake (`packages.cluster-just`): the platform
 # imports it directly; a downstream repo materializes it (flake output / the devbox
-# plugin) and adds `import '<path>/cluster.just'` to its justfile. These are
+# plugin, which also ensures the justfile imports it). These are
 # PRIMITIVES -- compose your own e2e (create -> deploy+test your app -> delete) in
 # your OWN recipe; the module deliberately does not call back into project recipes.
 #
@@ -17,7 +17,7 @@
 #   DCTL              how to invoke dctl (default: `nix run github:dantofa/platform#default --`)
 #   BASE_DOMAIN       ingress FQDN for `cluster local` (default: local.dantofa.dev)
 #   KUBECONFIG        kubeconfig path (default: ./.kubeconfig)
-#   LOCAL_CA_FILE     where `cluster local ca` writes the trust anchor (default: ./.local-ca.pem)
+#   LOCAL_CA_FILE     where `cluster local ca` writes the trust anchor (default: ./.local.pem)
 #   TRIVYIGNORE_BASE  mandatory accepted-CVE file (default: ./.trivyignore-cluster)
 #   TRIVYIGNORE_LOCAL optional extra accepted-CVE file (default: ./.trivyignore-cluster)
 
@@ -267,12 +267,12 @@ cluster-local-test: cluster-local-create cluster-local-verify && cluster-local-d
 # This is what replaces per-tool skip-verify flags: one anchor, understood by every
 # OpenSSL/Go/Python/Node HTTP stack via the standard CA-bundle env vars. Re-run it
 # after recreating the cluster -- the CA is minted per cluster, so a fresh cluster
-# means a fresh anchor. Config: ${KUBECONFIG:-.kubeconfig}, ${LOCAL_CA_FILE:-.local-ca.pem}.
+# means a fresh anchor. Config: ${KUBECONFIG:-.kubeconfig}, ${LOCAL_CA_FILE:-.local.pem}.
 cluster-local-ca:
   #!/usr/bin/env bash
   set -euo pipefail
   export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
-  out="${LOCAL_CA_FILE:-.local-ca.pem}"
+  out="${LOCAL_CA_FILE:-.local.pem}"
   # The CA Certificate is minted asynchronously after the cluster reconciles, so
   # give it a moment on a freshly-bootstrapped cluster rather than failing hard.
   for _ in $(seq 1 30); do

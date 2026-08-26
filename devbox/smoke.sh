@@ -18,7 +18,7 @@ echo "--- skill materialized for Claude Code (init_hook) ---"
 test -f .claude/skills/dantofa-platform/SKILL.md || { echo "SKILL.md not materialized"; exit 1; }
 
 echo "--- generated + local paths ignored, idempotently (init_hook) ---"
-for p in '.just/' '.claude/skills/dantofa-platform/' '.devbox/' '.claude/settings.local.json'; do
+for p in '.kubeconfig' '.local.pem' '.just/' '.devbox/' '.claude/skills/dantofa-platform/'; do
   grep -qxF "$p" .gitignore || { echo ".gitignore missing entry: $p"; exit 1; }
   test "$(grep -cxF "$p" .gitignore)" -eq 1 || { echo ".gitignore duplicated entry: $p"; exit 1; }
   echo "  ok $p"
@@ -27,6 +27,28 @@ done
 echo "--- env set + base ignore resolves to a real, non-empty file ---"
 echo "DCTL=${DCTL:?DCTL not set by plugin}  TRIVYIGNORE_BASE=${TRIVYIGNORE_BASE:?TRIVYIGNORE_BASE not set}"
 test -s "$TRIVYIGNORE_BASE"
+
+echo "--- consumer justfile gained the cluster.just import (init_hook) ---"
+# The harness seeded a justfile with its own recipe and no trailing newline, so
+# this covers the append path AND that appending did not splice onto that line.
+test -f justfile || { echo "justfile missing"; exit 1; }
+test "$(grep -cF ".just/cluster.just" justfile)" -eq 1 \
+  || { echo "import missing or duplicated in justfile"; exit 1; }
+just --summary | tr ' ' '\n' | grep -qx 'app-build' \
+  || { echo "the consumer's own recipe did not survive"; exit 1; }
+echo "  ok import present once, app-build intact"
+
+echo "--- ensure-justfile creates a justfile when the project has none ---"
+probe="$(mktemp -d)"
+( cd "$probe" && bash "$DEVBOX_PACKAGES_DIR/ensure-justfile.sh" >/dev/null )
+test -f "$probe/justfile" || { echo "no justfile created"; exit 1; }
+grep -qF ".just/cluster.just" "$probe/justfile" || { echo "created justfile lacks the import"; exit 1; }
+# Idempotent: a second run must not add a second import.
+( cd "$probe" && bash "$DEVBOX_PACKAGES_DIR/ensure-justfile.sh" >/dev/null )
+test "$(grep -cF ".just/cluster.just" "$probe/justfile")" -eq 1 \
+  || { echo "import duplicated on re-run"; exit 1; }
+rm -rf "$probe"
+echo "  ok created once, idempotent"
 
 echo "--- just cluster … dispatch routes to the flat recipes ---"
 just --dry-run cluster verify backup 2>&1 | grep -q 'cluster-verify'

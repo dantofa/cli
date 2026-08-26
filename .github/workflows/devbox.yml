@@ -4,7 +4,8 @@ name: devbox
 # synthetic downstream consumer includes the plugin (its `github:dantofa/platform`
 # flake refs rewritten to this checkout's flake, so we test the current code, not
 # master), then we assert the toolchain lands on PATH, cluster.just + the base
-# ignore materialize into ./.just, and `just cluster …` dispatches. No cluster is
+# ignore materialize into ./.just, the consumer's justfile gains the cluster.just
+# import, and `just cluster …` dispatches. No cluster is
 # provisioned -- the nix `preview`/`velero` workflows cover real cluster behavior;
 # this validates only the packaging. Path-filtered (not a required check), so it
 # only runs when the plugin, the module, or the flake outputs change.
@@ -57,7 +58,11 @@ jobs:
           sed "s#github:dantofa/platform#path:${GITHUB_WORKSPACE}#g" \
             "${GITHUB_WORKSPACE}/devbox/plugin.json" > "${harness}/plugin.json"
           printf '{\n  "include": ["path:./plugin.json"]\n}\n' > "${harness}/devbox.json"
-          printf "import '.just/cluster.just'\n" > "${harness}/justfile"
+          # Seed a justfile with the consumer's own recipe and deliberately NO
+          # trailing newline -- the plugin's init_hook must add its import without
+          # splicing onto that last line. (The create-from-nothing path is unit-
+          # tested directly in smoke.sh.)
+          printf 'app-build:\n  @echo building' > "${harness}/justfile"
           cd "${harness}"
           devbox install
           devbox run -- bash "${GITHUB_WORKSPACE}/devbox/smoke.sh"
