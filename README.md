@@ -63,8 +63,10 @@ Two ways to consume it, both rev-pinned via your lockfile:
   (`packages.cluster-just`, `packages.trivyignore-base`, `packages.skills`);
   materialize them into your dev shell.
 
-Either way `.just/cluster.just` lands in your project (import it and compose your own
-end-to-end flow over the primitives), and the platform's agent skill lands in
+Either way `.just/cluster.just` lands in your project — with **devbox the plugin also
+ensures your justfile imports it** (creating a justfile if you have none, appending the
+import if you do; idempotent either way), so you only write your own compose recipe. On
+the bare-flake path, add the import yourself. The platform's agent skill lands in
 `.claude/skills/dantofa-platform/SKILL.md` so Claude agents on your project discover the
 platform's conventions/infrastructure and reuse them (see [`SKILLS.md`](SKILLS.md)):
 

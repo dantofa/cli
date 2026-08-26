@@ -135,6 +135,19 @@
           destination = "/SKILL.md";
           text = builtins.readFile ./SKILLS.md;
         };
+        # The init_hook helper that gives a consuming project a justfile importing
+        # cluster.just. A script rather than another inline init_hook one-liner: it
+        # has real edge cases (which filename just picks up, appending to a file with
+        # no trailing newline, staying idempotent), so it lives in devbox/ where
+        # `just lint` shellchecks it and devbox/smoke.sh unit-tests both paths. The
+        # plugin runs it straight out of $DEVBOX_PACKAGES_DIR, so nothing extra lands
+        # in the consumer's tree. Trivial text derivation (no dctl/vendorHash impact).
+        ensure-justfile = (pkgsFor system).writeTextFile {
+          name = "ensure-justfile";
+          destination = "/ensure-justfile.sh";
+          text = builtins.readFile ./devbox/ensure-justfile.sh;
+          executable = true;
+        };
         # The CLIs the cluster.just recipes shell out to (dctl comes from
         # `default`), pinned to the same nixpkgs as everything else — bundled for
         # downstream consumers via the devbox plugin so `just cluster …` runs

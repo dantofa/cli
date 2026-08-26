@@ -6,7 +6,8 @@
     "github:dantofa/platform#cluster-toolchain",
     "github:dantofa/platform#cluster-just",
     "github:dantofa/platform#trivyignore-base",
-    "github:dantofa/platform#skills"
+    "github:dantofa/platform#skills",
+    "github:dantofa/platform#ensure-justfile"
   ],
   "env": {
     "DCTL": "dctl",
@@ -16,10 +17,11 @@
   },
   "shell": {
     "init_hook": [
-      "for p in '.just/' '.claude/skills/dantofa-platform/' '.devbox/' '.claude/settings.local.json' '.local-ca.pem'; do command grep -qxF \"$p\" .gitignore 2>/dev/null || printf '%s\\n' \"$p\" >> .gitignore; done",
+      "for p in '.kubeconfig' '.local.pem' '.just/' '.devbox/' '.claude/skills/dantofa-platform/'; do command grep -qxF \"$p\" .gitignore 2>/dev/null || printf '%s\\n' \"$p\" >> .gitignore; done",
       "mkdir -p .just",
       "install -m 0644 \"$DEVBOX_PACKAGES_DIR/cluster.just\" .just/cluster.just",
       "install -m 0644 \"$DEVBOX_PACKAGES_DIR/trivyignore-cluster\" .just/.trivyignore-base",
+      "bash \"$DEVBOX_PACKAGES_DIR/ensure-justfile.sh\"",
       "mkdir -p .claude/skills/dantofa-platform",
       "install -m 0644 \"$DEVBOX_PACKAGES_DIR/SKILL.md\" .claude/skills/dantofa-platform/SKILL.md"
     ]
