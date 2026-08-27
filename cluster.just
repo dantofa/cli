@@ -5,6 +5,7 @@
 #   just cluster verify backup|restore|image-scan   # verify platform infra
 #   just cluster local  create|verify|delete|test   # kind cluster lifecycle
 #   just cluster local  ca                          # export the local TLS trust anchor
+#   just cluster doks   create|bootstrap|connect|delete|list  # DOKS cluster lifecycle
 #
 # Distributed via the platform Nix flake (`packages.cluster-just`): the platform
 # imports it directly; a downstream repo materializes it (flake output / the devbox
@@ -16,6 +17,8 @@
 # devbox / direnv; no just-variable overrides needed):
 #   DCTL              how to invoke dctl (default: `nix run github:dantofa/platform#default --`)
 #   BASE_DOMAIN       ingress FQDN for `cluster local` (default: local.dantofa.dev)
+#   DOKS_CLUSTER      cluster name the `cluster doks` recipes act on (default: doks)
+#   DOKS_BASE_DOMAIN  ingress FQDN for `cluster doks bootstrap` (default: doks.dantofa.dev)
 #   KUBECONFIG        kubeconfig path (default: ./.kubeconfig)
 #   LOCAL_CA_FILE     where `cluster local ca` writes the trust anchor (default: ./.local.pem)
 #   TRIVYIGNORE_BASE  mandatory accepted-CVE file (default: ./.trivyignore-cluster)
@@ -31,6 +34,26 @@ cluster-verify action *args:
 
 cluster-local action *args:
   just cluster-local-{{action}} {{args}}
+
+cluster-doks action *args:
+  just cluster-doks-{{action}} {{args}}
+
+# Generic cluster health gate, independent of how the cluster was provisioned:
+# every node Ready, then the whole GitOps tree reconciled. This is the part of a
+# cluster verification that is NOT cluster-type-specific -- `cluster local verify`
+# composes it after connecting to kind, and a DOKS/preview flow composes it after
+# `cluster doks connect`, so both gate on exactly the same conditions. Acts on
+# whatever ${KUBECONFIG:-.kubeconfig} points at.
+cluster-verify-health:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export KUBECONFIG="${KUBECONFIG:-.kubeconfig}"
+  # shellcheck disable=SC2206
+  dctl=(${DCTL:-nix run github:dantofa/platform#default --})
+  kubectl wait --for=condition=Ready nodes --all --timeout="${NODE_TIMEOUT:-180s}"
+  # Generous default: a cold cluster pulls every image before a root reports Ready.
+  "${dctl[@]}" flux kustomization verify --wait --timeout "${FLUX_TIMEOUT:-600s}" \
+    --kubeconfig "$KUBECONFIG"
 
 # Integration check (CI): assert Flux installed Velero and a backup completes.
 # Targets the cluster in $KUBECONFIG; run after bootstrapping the backup stack.
@@ -243,9 +266,9 @@ cluster-local-verify:
   # shellcheck disable=SC2206
   dctl=(${DCTL:-nix run github:dantofa/platform#default --})
   "${dctl[@]}" local cluster connect
-  kubectl wait --for=condition=Ready nodes --all --timeout=180s
-  # Gate on the whole GitOps tree reconciling (generous timeout for cold pulls).
-  "${dctl[@]}" flux kustomization verify --wait --timeout 600s --kubeconfig .kubeconfig
+  # Everything past `connect` is cluster-type-agnostic -- same gates as any other
+  # cluster type runs.
+  just cluster-verify-health
   just cluster-verify-backup
   just cluster-verify-image-scan
 
@@ -257,6 +280,16 @@ cluster-local-delete *args:
   # shellcheck disable=SC2206
   dctl=(${DCTL:-nix run github:dantofa/platform#default --})
   "${dctl[@]}" local cluster delete {{args}}
+
+# List the local (kind) clusters on this machine. A thin pass-through to dctl, kept
+# for verb-completeness alongside create/delete so the namespace reads the same on
+# both cluster types. Uses $DCTL.
+cluster-local-list:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # shellcheck disable=SC2206
+  dctl=(${DCTL:-nix run github:dantofa/platform#default --})
+  "${dctl[@]}" local cluster list
 
 # Generic smoke: create -> verify -> delete (delete runs after, on success only).
 # Consumers wanting an app-inclusive e2e write their own recipe composing these.
@@ -296,6 +329,85 @@ cluster-local-ca:
   echo
   echo "Browsers use their own store; import once with:"
   echo "  certutil -d sql:\$HOME/.pki/nssdb -A -t 'C,,' -n dantofa-local -i $abs"
+
+# --- DOKS (DigitalOcean) cluster lifecycle -------------------------------------
+#
+# The `cluster doks` namespace mirrors `cluster local` for the verbs where a DOKS
+# analogue is meaningful. Two deliberate differences from the local namespace:
+#
+#   * There is no `cluster doks test`. The local one is create -> verify -> delete;
+#     on DOKS that provisions and destroys BILLED infrastructure behind one word.
+#     Compose it yourself in a workflow where the intent is explicit.
+#   * `cluster doks create` does NOT bootstrap (the local one does). A DOKS cluster
+#     takes minutes to come up and is usually bootstrapped more than once with
+#     different flags per environment (--dolb / --tls-issuer / --env), so the two
+#     stay separate steps.
+#
+# Every recipe acts on ${DOKS_CLUSTER:-doks} -- a scratch-cluster default, never a
+# production name -- so a mistyped or forgotten override cannot touch a real
+# cluster. Point them elsewhere by exporting DOKS_CLUSTER. Needs
+# DIGITALOCEAN_ACCESS_TOKEN in the environment (dctl reads it directly).
+
+# List the DOKS clusters on the account. Uses $DCTL.
+cluster-doks-list:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # shellcheck disable=SC2206
+  dctl=(${DCTL:-nix run github:dantofa/platform#default --})
+  "${dctl[@]}" digitalocean cluster list
+
+# Fetch the cluster's kubeconfig so the cluster-type-agnostic recipes
+# (`cluster verify health|backup|restore|image-scan`, `cluster debug`) can run
+# against it -- the DOKS counterpart of `dctl local cluster connect`. `*args` pass
+# through. Config: ${DOKS_CLUSTER:-doks}, ${KUBECONFIG:-.kubeconfig}.
+cluster-doks-connect *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cluster="${DOKS_CLUSTER:-doks}"
+  kubeconfig="${KUBECONFIG:-.kubeconfig}"
+  # shellcheck disable=SC2206
+  dctl=(${DCTL:-nix run github:dantofa/platform#default --})
+  "${dctl[@]}" digitalocean cluster connect "$cluster" --output "$kubeconfig" {{args}}
+
+# Create the DOKS cluster. --wait so it is actually running when the recipe
+# returns, since `cluster doks bootstrap` needs a reachable API server. `*args`
+# pass through to create (--ha, --node-pool-size, --region, --node-pool-min/max,
+# --version, --tag). Config: ${DOKS_CLUSTER:-doks}.
+cluster-doks-create *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cluster="${DOKS_CLUSTER:-doks}"
+  # shellcheck disable=SC2206
+  dctl=(${DCTL:-nix run github:dantofa/platform#default --})
+  echo "Creating DOKS cluster '${cluster}' (billed infrastructure)..."
+  "${dctl[@]}" digitalocean cluster create --name "$cluster" --wait {{args}}
+
+# Bootstrap the platform onto an already-created DOKS cluster. `*args` pass through
+# and carry the per-environment decisions (--dolb, --tls-issuer, --env,
+# --grafana-cloud); dctl reads the bws secret-zero and the Spaces region from the
+# environment itself. Config: ${DOKS_CLUSTER:-doks},
+# ${DOKS_BASE_DOMAIN:-doks.dantofa.dev}.
+cluster-doks-bootstrap *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cluster="${DOKS_CLUSTER:-doks}"
+  base_domain="${DOKS_BASE_DOMAIN:-doks.dantofa.dev}"
+  # shellcheck disable=SC2206
+  dctl=(${DCTL:-nix run github:dantofa/platform#default --})
+  "${dctl[@]}" digitalocean cluster bootstrap "$cluster" --base-domain "$base_domain" {{args}}
+
+# Delete the DOKS cluster via the graceful teardown (drains DNS records, stops the
+# ingress controller, reaps any tunnel). Destroys billed infrastructure, so the
+# target is echoed before acting -- read it. `*args` pass through (--force,
+# --no-teardown). Config: ${DOKS_CLUSTER:-doks}.
+cluster-doks-delete *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cluster="${DOKS_CLUSTER:-doks}"
+  # shellcheck disable=SC2206
+  dctl=(${DCTL:-nix run github:dantofa/platform#default --})
+  echo "Deleting DOKS cluster '${cluster}' and its ingress DNS records..."
+  "${dctl[@]}" digitalocean cluster delete "$cluster" {{args}}
 
 # Launch Chromium against the local cluster. The cluster publishes its ingress on
 # the host's real :80/:443 and ${BASE_DOMAIN} resolves to 127.0.0.1, so the real URL

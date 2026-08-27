@@ -139,6 +139,21 @@ into your recipes):
   `dctl … cluster bootstrap --base-domain <domain> --dolb --tls-issuer letsencrypt --env prod [--grafana-cloud]`.
   Traefik + external-dns behind a DO LoadBalancer, a real Let's Encrypt cert.
 
+Both DOKS flows are also available as `cluster.just` recipes —
+`just cluster doks create|bootstrap|connect|delete|list` — which act on
+`${DOKS_CLUSTER:-doks}` with `${DOKS_BASE_DOMAIN:-doks.dantofa.dev}`, so export
+`DOKS_CLUSTER` to point them at a real cluster. Two deliberate differences from the
+local namespace: there is **no `cluster doks test`** (the local one deletes the
+cluster it made; on billed infrastructure that belongs in an explicit workflow), and
+`cluster doks create` does **not** bootstrap, since a DOKS cluster is usually
+bootstrapped more than once with different per-environment flags.
+
+Verification is **cluster-type-agnostic**: `just cluster verify health` (all nodes
+Ready + the whole GitOps tree reconciled), plus `backup|restore|image-scan` and
+`just cluster debug`, all act on whatever `$KUBECONFIG` points at. So a downstream
+e2e differs between local and DOKS by only the lifecycle line — connect, then run
+the same gates.
+
 A downstream e2e is your own recipe: `create → deploy your app → test → delete`.
 
 ### Which TLS issuer applies where
