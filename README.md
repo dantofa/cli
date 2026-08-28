@@ -45,10 +45,12 @@ module — `cluster.just` — that downstream projects can import to operate any
 cluster they provision:
 
 ```bash
-just cluster debug                              # snapshot cluster + Flux state
-just cluster verify backup|restore|image-scan   # verify platform infra
-just cluster local  create|verify|delete|test   # kind cluster lifecycle
-just cluster local  chromium|playwright|curl [args]  # a browser/curl wired to the cluster ingress
+just cluster debug                                     # snapshot cluster + Flux state
+just cluster verify health|backup|restore|image-scan   # verify any cluster, whatever provisioned it
+just cluster local  create|bootstrap|verify|delete|test|list  # kind cluster lifecycle
+just cluster local  ca                                 # export the local TLS trust anchor
+just cluster local  chromium|playwright|curl [args]    # a browser/curl wired to the cluster ingress
+just cluster doks   create|bootstrap|connect|delete|list      # DOKS cluster lifecycle
 ```
 
 Two ways to consume it, both rev-pinned via your lockfile:
