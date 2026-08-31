@@ -6,6 +6,7 @@ import (
 	"time"
 
 	fluxcore "github.com/dantofa/platform/internal/core/flux"
+	"github.com/dantofa/platform/internal/core/retry"
 )
 
 // clusterVarsNamespace is where the cluster-vars ConfigMap lives (mirrors the
@@ -42,6 +43,49 @@ var CloudflareSecretLocations = []SecretRef{
 type ClusterReader interface {
 	SecretValue(ctx context.Context, namespace, name, key string) (string, error)
 	ConfigMapValue(ctx context.Context, namespace, name, key string) (string, error)
+}
+
+// Retry budget for the cluster reads below. These are single quick lookups, so a
+// short window is enough to ride out a dropped connection; a definitive error is
+// not retried at all and still fails immediately.
+const (
+	readTimeout = 30 * time.Second
+	readDelay   = 2 * time.Second
+)
+
+// retryingReader rides out transport-level failures on the reads that decide
+// whether a teardown can proceed. Without it a single dropped connection aborts
+// `cluster delete` before the cluster is destroyed — which does not fail safe: it
+// leaves a running cluster behind, billing, until someone notices.
+type retryingReader struct {
+	inner   ClusterReader
+	timeout time.Duration
+	delay   time.Duration
+}
+
+// WithRetry wraps a ClusterReader so its reads survive a transient connection
+// failure, retrying for up to timeout with delay between attempts. Applied inside
+// Run with the readTimeout/readDelay budget, so every caller gets it.
+func WithRetry(r ClusterReader, timeout, delay time.Duration) ClusterReader {
+	return retryingReader{inner: r, timeout: timeout, delay: delay}
+}
+
+func (r retryingReader) SecretValue(ctx context.Context, namespace, name, key string) (string, error) {
+	var v string
+	err := retry.Do(ctx, r.timeout, r.delay, func() (err error) {
+		v, err = r.inner.SecretValue(ctx, namespace, name, key)
+		return err
+	})
+	return v, err
+}
+
+func (r retryingReader) ConfigMapValue(ctx context.Context, namespace, name, key string) (string, error) {
+	var v string
+	err := retry.Do(ctx, r.timeout, r.delay, func() (err error) {
+		v, err = r.inner.ConfigMapValue(ctx, namespace, name, key)
+		return err
+	})
+	return v, err
 }
 
 // ResolveCloudflareToken returns the Cloudflare API token from the in-cluster
@@ -119,6 +163,7 @@ func ResolveTunnel(ctx context.Context, r ClusterReader) (TunnelRef, bool, error
 // Keeping this in core lets the DOKS and local delete commands stay thin and
 // share the exact same flow (the tunnel steps are simply no-ops on DOKS).
 func Run(ctx context.Context, r ClusterReader, k KubeAPI, newCF func(token string) (CloudflareAPI, error), timeout, interval time.Duration) (Result, error) {
+	r = WithRetry(r, readTimeout, readDelay)
 	token, err := ResolveCloudflareToken(ctx, r)
 	if err != nil {
 		return Result{}, err

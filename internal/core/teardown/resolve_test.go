@@ -2,6 +2,9 @@ package teardown
 
 import (
 	"context"
+	"errors"
+	"io"
+	"net/url"
 	"testing"
 	"time"
 
@@ -21,6 +24,64 @@ func (f *fakeReader) SecretValue(_ context.Context, ns, name, key string) (strin
 
 func (f *fakeReader) ConfigMapValue(_ context.Context, ns, name, key string) (string, error) {
 	return f.configMaps[ns+"/"+name+"/"+key], nil
+}
+
+// flakyReader fails the first failures calls of each read with err, then serves
+// from the embedded fakeReader — a stand-in for a managed API server dropping a
+// connection.
+type flakyReader struct {
+	*fakeReader
+	err      error
+	failures int
+	calls    int
+}
+
+func (f *flakyReader) SecretValue(ctx context.Context, ns, name, key string) (string, error) {
+	f.calls++
+	if f.calls <= f.failures {
+		return "", f.err
+	}
+	return f.fakeReader.SecretValue(ctx, ns, name, key)
+}
+
+func (f *flakyReader) ConfigMapValue(ctx context.Context, ns, name, key string) (string, error) {
+	f.calls++
+	if f.calls <= f.failures {
+		return "", f.err
+	}
+	return f.fakeReader.ConfigMapValue(ctx, ns, name, key)
+}
+
+// A dropped connection on this read used to abort `cluster delete` outright,
+// which does not fail safe: the cluster stays up and keeps billing. Ride it out.
+func TestWithRetryRidesOutDroppedConnection(t *testing.T) {
+	r := &flakyReader{
+		fakeReader: &fakeReader{secrets: map[string]string{
+			"external-dns/cloudflare-api/api_token": "tok",
+		}},
+		err:      &url.Error{Op: "Get", URL: "https://x/api/v1/secrets", Err: io.EOF},
+		failures: 2,
+	}
+	got, err := ResolveCloudflareToken(context.Background(), WithRetry(r, 100*time.Millisecond, time.Millisecond))
+	if err != nil {
+		t.Fatalf("ResolveCloudflareToken: %v", err)
+	}
+	if got != "tok" {
+		t.Errorf("token = %q, want %q", got, "tok")
+	}
+}
+
+func TestWithRetryDoesNotRetryDefinitiveErrors(t *testing.T) {
+	// A permission problem is an answer: surface it now rather than after the
+	// read budget expires.
+	sentinel := errors.New(`secrets "cloudflare-api" is forbidden`)
+	r := &flakyReader{fakeReader: &fakeReader{}, err: sentinel, failures: 1}
+	if _, err := ResolveCloudflareToken(context.Background(), WithRetry(r, 100*time.Millisecond, time.Millisecond)); !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want %v", err, sentinel)
+	}
+	if r.calls != 1 {
+		t.Errorf("calls = %d, want 1 (no retry)", r.calls)
+	}
 }
 
 // fakeCF satisfies CloudflareAPI: no records (drains immediately), records the
