@@ -100,6 +100,59 @@ func (c *Client) ApplySecret(ctx context.Context, namespace, name string, data m
 	return err
 }
 
+// SecretExists reports whether a Secret is present, so a source that only
+// references a credential can be rejected before it is written rather than
+// failing minutes later inside source-controller.
+func (c *Client) SecretExists(ctx context.Context, namespace, name string) (bool, error) {
+	_, err := c.cs.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ApplyDockerConfigSecret creates or updates a kubernetes.io/dockerconfigjson
+// image pull secret from a rendered docker config. Separate from ApplySecret
+// because the Secret type is not cosmetic: an OCIRepository's secretRef is only
+// honoured when the Secret carries this type and its .dockerconfigjson key.
+func (c *Client) ApplyDockerConfigSecret(ctx context.Context, namespace, name string, config []byte) error {
+	secrets := c.cs.CoreV1().Secrets(namespace)
+	data := map[string][]byte{corev1.DockerConfigJsonKey: config}
+	existing, err := secrets.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = secrets.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Type:       corev1.SecretTypeDockerConfigJson,
+			Data:       data,
+		}, metav1.CreateOptions{})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	// A Secret's type is immutable, so an existing Secret of the wrong type (e.g.
+	// an Opaque one left by a git source of the same name) can only be replaced.
+	if existing.Type != corev1.SecretTypeDockerConfigJson {
+		if err := secrets.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+			return err
+		}
+		_, err = secrets.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name, Namespace: namespace, Annotations: existing.Annotations,
+			},
+			Type: corev1.SecretTypeDockerConfigJson,
+			Data: data,
+		}, metav1.CreateOptions{})
+		return err
+	}
+	existing.Data = data
+	_, err = secrets.Update(ctx, existing, metav1.UpdateOptions{})
+	return err
+}
+
 // ApplyConfigMap creates or updates a ConfigMap with the given data.
 func (c *Client) ApplyConfigMap(ctx context.Context, namespace, name string, data map[string]string) error {
 	cms := c.cs.CoreV1().ConfigMaps(namespace)

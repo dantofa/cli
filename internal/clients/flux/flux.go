@@ -65,10 +65,28 @@ func (c *Client) Install(ctx context.Context, version string) error {
 }
 
 // CreateGitSource registers (create-or-update) a GitRepository source.
-func (c *Client) CreateGitSource(ctx context.Context, name, url, branch string) error {
-	return c.run(ctx, "create", "source", "git", name,
-		"--url", url, "--branch", branch, "--interval", "1m",
-		"--namespace", fluxNamespace)
+func (c *Client) CreateGitSource(ctx context.Context, spec fluxcore.SourceSpec) error {
+	return c.run(ctx, gitSourceArgs(spec)...)
+}
+
+// gitSourceArgs builds the `flux create source git` invocation for a spec. Split
+// out so the flag composition is asserted directly in tests — a misplaced or
+// dropped flag here is otherwise only visible as a mis-shaped object in a live
+// cluster.
+//
+// --silent is unconditional: on an SSH URL with no --secret-ref the flux CLI
+// generates a deploy key and blocks on an interactive confirmation, which in CI
+// is a hang rather than a failure.
+func gitSourceArgs(spec fluxcore.SourceSpec) []string {
+	args := []string{
+		"create", "source", "git", spec.Name,
+		"--url", spec.URL, "--branch", spec.Revision, "--interval", "1m",
+		"--silent", "--namespace", fluxNamespace,
+	}
+	if spec.SecretRef != "" {
+		args = append(args, "--secret-ref", spec.SecretRef)
+	}
+	return args
 }
 
 // DeleteGitSource removes a GitRepository source.
@@ -78,17 +96,28 @@ func (c *Client) DeleteGitSource(ctx context.Context, name string) error {
 }
 
 // CreateOCISource registers (create-or-update) an OCIRepository source at the
-// given tag. insecure allows a plain-HTTP registry (the in-cluster kind
+// spec's tag. spec.Insecure allows a plain-HTTP registry (the in-cluster kind
 // registry); leave it off for TLS registries such as ghcr.io.
-func (c *Client) CreateOCISource(ctx context.Context, name, url, tag string, insecure bool) error {
+func (c *Client) CreateOCISource(ctx context.Context, spec fluxcore.SourceSpec) error {
+	return c.run(ctx, ociSourceArgs(spec)...)
+}
+
+// ociSourceArgs builds the `flux create source oci` invocation for a spec. The
+// --secret-ref it passes must name a kubernetes.io/dockerconfigjson secret (an
+// image pull secret), unlike the git source's basic-auth/SSH secret.
+func ociSourceArgs(spec fluxcore.SourceSpec) []string {
 	args := []string{
-		"create", "source", "oci", name,
-		"--url", url, "--tag", tag, "--interval", "1m", "--namespace", fluxNamespace,
+		"create", "source", "oci", spec.Name,
+		"--url", spec.URL, "--tag", spec.Revision, "--interval", "1m",
+		"--namespace", fluxNamespace,
 	}
-	if insecure {
+	if spec.Insecure {
 		args = append(args, "--insecure")
 	}
-	return c.run(ctx, args...)
+	if spec.SecretRef != "" {
+		args = append(args, "--secret-ref", spec.SecretRef)
+	}
+	return args
 }
 
 // DeleteOCISource removes an OCIRepository source.

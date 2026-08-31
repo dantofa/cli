@@ -100,6 +100,20 @@ manual step. (No stack currently uses this — it backed the in-cluster Grafana 
 password, dropped when visualization moved to Grafana Cloud — but it stays documented
 as the sanctioned pattern for disposable secrets.)
 
+**Secret-zero exceptions (planted by `dctl`, not ESO).** Two credentials cannot come
+from ESO, because ESO itself is reconciled *from* the source they unlock: the Bitwarden
+machine-account token (`ProvisionESOAccessToken`) and a **private source credential**.
+`dctl flux source create --secret-ref` points a source at a Secret created out of band
+(checked to exist first — the flux CLI does not validate the reference, it just blocks on
+readiness until its timeout); `--token` mints it (`AddSource` → `SourceSecretStore`) — an
+Opaque `username`/`password` Secret for a `GitRepository`, a
+`kubernetes.io/dockerconfigjson` pull secret for an `OCIRepository` (the only shape its
+`secretRef` honours). SSH deploy keys stay
+`--secret-ref`-only: minting one needs a `known_hosts` host-key scan plus an out-of-band
+registration on the forge, which `flux create secret git` already does well. The auth
+flags are **declarative** — `source create` rewrites the whole object, so omitting them
+on a later call strips the credential; pass them every time.
+
 ## The two-tier tooling rule (important)
 
 Dependencies are split by purpose:
