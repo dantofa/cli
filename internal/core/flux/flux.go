@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"golang.org/x/net/publicsuffix"
+
+	"github.com/dantofa/platform/internal/core/retry"
 )
 
 // Defaults for the platform GitOps source a cluster is bootstrapped against.
@@ -681,17 +683,34 @@ func VerifyKustomizations(ctx context.Context, s KustomizationStatuser, namespac
 // snapshot gate into a convergence gate for CI after a bootstrap/apply.
 func VerifyKustomizationsWait(ctx context.Context, s KustomizationStatuser, namespace string, timeout, interval time.Duration) (statuses []KustomizationStatus, ok bool, err error) {
 	deadline := time.Now().Add(timeout)
+	// lastErr holds a transient failure so it can still be reported if the wait
+	// ends without ever recovering. A dropped connection mid-wait must not end the
+	// wait: a managed API server closes one now and then, and this loop exists
+	// precisely to outlast conditions that resolve themselves.
+	var lastErr error
 	for {
-		statuses, ok, err = VerifyKustomizations(ctx, s, namespace)
-		if err != nil {
+		// statuses/ok are only updated on a successful poll, so a blip on the last
+		// one does not erase the report the caller would otherwise have shown.
+		got, allReady, err := VerifyKustomizations(ctx, s, namespace)
+		switch {
+		case err == nil:
+			statuses, ok, lastErr = got, allReady, nil
+			if ok {
+				return statuses, true, nil
+			}
+		case retry.Transient(err):
+			lastErr = err
+		default:
+			// A definitive answer (RBAC, a bad kubeconfig): retrying it would only
+			// spend the caller's whole timeout to report the same thing.
 			return nil, false, err
 		}
-		if ok || !time.Now().Before(deadline) {
-			return statuses, ok, nil
+		if !time.Now().Before(deadline) {
+			return statuses, ok && lastErr == nil, lastErr
 		}
 		select {
 		case <-ctx.Done():
-			return statuses, ok, ctx.Err()
+			return statuses, false, ctx.Err()
 		case <-time.After(interval):
 		}
 	}

@@ -3,6 +3,8 @@ package flux
 import (
 	"context"
 	"errors"
+	"io"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -197,12 +199,16 @@ func TestBootstrapGitRegistersGitSource(t *testing.T) {
 type fakeKustomizationStatuser struct {
 	statuses   []KustomizationStatus
 	err        error
-	readyAfter int // become all-ready on this call number (0 = never flip)
+	errOn      map[int]error // errors returned on specific call numbers
+	readyAfter int           // become all-ready on this call number (0 = never flip)
 	calls      int
 }
 
 func (f *fakeKustomizationStatuser) KustomizationStatuses(context.Context, string) ([]KustomizationStatus, error) {
 	f.calls++
+	if err, ok := f.errOn[f.calls]; ok {
+		return nil, err
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -290,6 +296,69 @@ func TestVerifyKustomizationsWaitTimesOut(t *testing.T) {
 	}
 	if ok || len(statuses) != 1 {
 		t.Errorf("expected a timed-out report with the problem, got ok=%v statuses=%v", ok, statuses)
+	}
+}
+
+// The failure that broke CI twice: a managed API server drops one connection
+// mid-wait. The wait exists to outlast conditions that resolve themselves, so a
+// single blip must not end it.
+func TestVerifyKustomizationsWaitSurvivesTransientError(t *testing.T) {
+	f := &fakeKustomizationStatuser{
+		statuses:   []KustomizationStatus{{Name: "platform", Status: "InProgress", Ready: false}},
+		errOn:      map[int]error{2: &url.Error{Op: "Get", URL: "https://x/apis", Err: io.EOF}},
+		readyAfter: 3,
+	}
+	statuses, ok, err := VerifyKustomizationsWait(context.Background(), f, "", time.Second, time.Millisecond)
+	if err != nil {
+		t.Fatalf("a dropped connection must not fail the wait: %v", err)
+	}
+	if !ok {
+		t.Error("expected ok once the stacks converged after the blip")
+	}
+	if len(statuses) != 1 {
+		t.Errorf("expected the converged report, got %v", statuses)
+	}
+}
+
+func TestVerifyKustomizationsWaitReportsPersistentTransientError(t *testing.T) {
+	// Never recovering is still a failure — the caller must be told why, not
+	// handed a silent not-ready.
+	f := &fakeKustomizationStatuser{err: &url.Error{Op: "Get", Err: io.EOF}}
+	_, ok, err := VerifyKustomizationsWait(context.Background(), f, "", 20*time.Millisecond, time.Millisecond)
+	if err == nil {
+		t.Fatal("expected the last transient error to surface on timeout")
+	}
+	if !errors.Is(err, io.EOF) {
+		t.Errorf("err = %v, want it to wrap io.EOF", err)
+	}
+	if ok {
+		t.Error("expected not ok")
+	}
+}
+
+func TestVerifyKustomizationsWaitFailsFastOnDefinitiveError(t *testing.T) {
+	// An RBAC or kubeconfig problem is an answer, not a blip: retrying it would
+	// spend the caller's whole timeout to report the same thing.
+	sentinel := errors.New(`kustomizations is forbidden: User cannot list resource`)
+	f := &fakeKustomizationStatuser{err: sentinel}
+	if _, _, err := VerifyKustomizationsWait(context.Background(), f, "", time.Minute, time.Millisecond); !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want %v", err, sentinel)
+	}
+	if f.calls != 1 {
+		t.Errorf("calls = %d, want 1 (no retry)", f.calls)
+	}
+}
+
+func TestVerifyKustomizationsWaitKeepsLastGoodReport(t *testing.T) {
+	// A blip on the final poll must not erase the statuses the caller would
+	// otherwise print to explain what was still pending.
+	f := &fakeKustomizationStatuser{
+		statuses: []KustomizationStatus{{Name: "velero", Status: "Failed", Ready: false}},
+		errOn:    map[int]error{2: io.EOF, 3: io.EOF, 4: io.EOF, 5: io.EOF},
+	}
+	statuses, _, _ := VerifyKustomizationsWait(context.Background(), f, "", 15*time.Millisecond, time.Millisecond)
+	if len(statuses) != 1 || statuses[0].Name != "velero" {
+		t.Errorf("expected the last good report to survive, got %v", statuses)
 	}
 }
 

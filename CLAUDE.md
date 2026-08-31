@@ -170,6 +170,13 @@ only tracks its own app-image CVEs.
 - **Requires Go 1.26.**
 - **`just sast` is security-scoped** (`govulncheck`). Quality checks (dead code,
   style) live in `just lint`.
+- **Cluster calls ride out transient failures** (`internal/core/retry`). A managed
+  API server drops a connection now and then, so a poll loop or a pre-delete read
+  must not return on the first error: retry while `retry.Transient` says the
+  failure was transport-level, and fail fast otherwise so a real misconfiguration
+  (RBAC, bad kubeconfig) still surfaces immediately instead of costing the whole
+  timeout. Getting this wrong on the teardown path does not fail safe — it leaves
+  a running cluster behind.
 - **pre-commit delegates to `just` targets** (`.pre-commit-config.yaml`); the
   hook is installed by the dev shell's `shellHook` on `nix develop` entry
   (skipped under `CI`).
