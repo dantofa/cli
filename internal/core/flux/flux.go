@@ -7,6 +7,8 @@ package flux
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -234,9 +236,9 @@ func (t SourceType) DefaultRevision() string {
 // (idempotent).
 type Engine interface {
 	Install(ctx context.Context, version string) error
-	CreateGitSource(ctx context.Context, name, url, branch string) error
+	CreateGitSource(ctx context.Context, spec SourceSpec) error
 	DeleteGitSource(ctx context.Context, name string) error
-	CreateOCISource(ctx context.Context, name, url, tag string, insecure bool) error
+	CreateOCISource(ctx context.Context, spec SourceSpec) error
 	DeleteOCISource(ctx context.Context, name string) error
 	DeleteKustomization(ctx context.Context, name string) error
 }
@@ -273,6 +275,29 @@ type Applier interface {
 type SecretApplier interface {
 	EnsureNamespace(ctx context.Context, name string) error
 	ApplySecret(ctx context.Context, namespace, name string, data map[string][]byte, annotations map[string]string) error
+}
+
+// SourceSecretStore is the cluster-side credential surface a private source
+// needs: minting the Secret it authenticates with — an Opaque basic-auth Secret
+// for git, a dockerconfigjson pull secret for OCI (the only shape an
+// OCIRepository's secretRef accepts), both create-or-update — and checking that a
+// referenced Secret is actually there. Satisfied by the kube adapter.
+//
+// This credential is secret-zero, like the Bitwarden access token: it cannot come
+// from ESO, because ESO is itself reconciled from the very source the credential
+// authenticates. That is why dctl plants it directly.
+type SourceSecretStore interface {
+	SecretExists(ctx context.Context, namespace, name string) (bool, error)
+	ApplySecret(ctx context.Context, namespace, name string, data map[string][]byte, annotations map[string]string) error
+	ApplyDockerConfigSecret(ctx context.Context, namespace, name string, config []byte) error
+}
+
+// BootstrapApplier is the full cluster-side surface Bootstrap needs: the
+// cluster-vars ConfigMap and reconcile roots, plus the source credential when the
+// platform source is private.
+type BootstrapApplier interface {
+	Applier
+	SourceSecretStore
 }
 
 // TLS issuer names — the cert-manager ClusterIssuer the Traefik default cert is
@@ -530,12 +555,128 @@ func ProvisionESOAccessToken(ctx context.Context, a SecretApplier, token string)
 // SourceSpec describes a Flux source to register: its Type (oci/git) selects the
 // source CRD kind and how Revision is read (an OCI tag or a git branch).
 // Insecure allows plain-HTTP OCI, for the in-cluster kind registry only.
+//
+// SecretRef/Token/Username authenticate the source against a private repository
+// or registry. They are declarative like every other field: `source create` is a
+// create-or-update over the whole object, so a later call that omits them strips
+// the credential off an existing source. Pass them on every invocation.
 type SourceSpec struct {
 	Type     SourceType
 	Name     string
 	URL      string
 	Revision string
 	Insecure bool
+	// SecretRef names an existing Secret in flux-system the source authenticates
+	// with (spec.secretRef). Empty leaves the source anonymous — it can then only
+	// track a publicly readable repository/registry. With Token set, this instead
+	// names the Secret to mint (default: "<Name>-auth").
+	SecretRef string
+	// Token, when set, mints the credential Secret as part of registering the
+	// source: HTTPS basic auth for git (Username + Token), a dockerconfigjson pull
+	// secret for OCI. Leave it empty to reference a Secret created out of band —
+	// the only option for SSH deploy keys, which need a known_hosts host-key scan
+	// and an out-of-band registration step (`flux create secret git`).
+	Token string
+	// Username is the basic-auth user paired with Token. Empty defaults to
+	// DefaultSourceUsername, which is what a forge expects alongside a PAT.
+	Username string
+}
+
+// SourceAuth defaults and conventions for an authenticated source.
+const (
+	// DefaultSourceUsername is the basic-auth username paired with a --token when
+	// none is given. GitHub/GitLab ignore the username for a PAT but require a
+	// non-empty one, and "git" is the conventional placeholder.
+	DefaultSourceUsername = "git"
+	// sourceSecretSuffix builds the default minted-Secret name, "<source>-auth",
+	// so a source and its credential stay associated without the caller naming it.
+	sourceSecretSuffix = "-auth"
+)
+
+// SecretName is the Secret this spec's source authenticates with: SecretRef when
+// given, else the derived "<name>-auth" when a Token is being minted, else "" for
+// an anonymous source.
+func (s SourceSpec) SecretName() string {
+	if s.SecretRef != "" {
+		return s.SecretRef
+	}
+	if s.Token != "" {
+		return s.Name + sourceSecretSuffix
+	}
+	return ""
+}
+
+// BasicAuthUsername is the username minted alongside Token.
+func (s SourceSpec) BasicAuthUsername() string {
+	if s.Username != "" {
+		return s.Username
+	}
+	return DefaultSourceUsername
+}
+
+// Validate rejects source specs whose auth fields cannot be honoured, before
+// anything is written to the cluster.
+func (s SourceSpec) Validate() error {
+	if s.Token == "" {
+		return nil
+	}
+	if s.Type == SourceGit && isSSHURL(s.URL) {
+		return fmt.Errorf("--token is HTTPS basic auth and cannot authenticate the SSH URL %q: "+
+			"create an SSH deploy-key secret out of band (`flux create secret git <name> --url %s`, "+
+			"which scans the host key and prints the key to register on the forge) "+
+			"and reference it with --secret-ref", s.URL, s.URL)
+	}
+	return nil
+}
+
+// isSSHURL reports whether a git URL is fetched over SSH rather than HTTPS —
+// either an ssh:// scheme or the scp-like "git@host:org/repo" form.
+func isSSHURL(url string) bool {
+	if strings.HasPrefix(url, "ssh://") {
+		return true
+	}
+	// scp-like syntax: a user@host prefix before the first "/" (which would
+	// otherwise be a scheme's "//").
+	at := strings.Index(url, "@")
+	return at > 0 && !strings.Contains(url[:at], "/")
+}
+
+// RegistryHost extracts the registry a dockerconfigjson entry is keyed by from an
+// OCI source URL: "oci://ghcr.io/dantofa/platform" -> "ghcr.io". A host:port
+// registry (the in-cluster kind registry) is preserved intact.
+func RegistryHost(ociURL string) (string, error) {
+	host := strings.TrimPrefix(ociURL, "oci://")
+	if i := strings.Index(host, "/"); i >= 0 {
+		host = host[:i]
+	}
+	if host == "" {
+		return "", fmt.Errorf("cannot determine the registry host from OCI URL %q", ociURL)
+	}
+	return host, nil
+}
+
+// DockerConfigJSON renders the .dockerconfigjson payload of an image pull secret
+// for one registry. The "auth" field is the base64 of "user:password" — the field
+// registries actually read, with username/password kept alongside for the clients
+// that prefer them.
+func DockerConfigJSON(registry, username, password string) ([]byte, error) {
+	type entry struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Auth     string `json:"auth"`
+	}
+	cfg := struct {
+		Auths map[string]entry `json:"auths"`
+	}{
+		Auths: map[string]entry{
+			registry: {
+				Username: username,
+				Password: password,
+				Auth:     base64.StdEncoding.EncodeToString([]byte(username + ":" + password)),
+			},
+		},
+	}
+	return json.Marshal(cfg)
 }
 
 // KustomizationSpec describes a Kustomization reconciling a path from a source.
@@ -553,12 +694,14 @@ type KustomizationSpec struct {
 	Substitute bool
 }
 
-// SourceResult reports a registered source.
+// SourceResult reports a registered source. SecretRef is the credential it
+// authenticates with, omitted for an anonymous (public) source.
 type SourceResult struct {
-	Source   string `json:"source"`
-	Kind     string `json:"kind"`
-	URL      string `json:"url"`
-	Revision string `json:"revision"`
+	Source    string `json:"source"`
+	Kind      string `json:"kind"`
+	URL       string `json:"url"`
+	Revision  string `json:"revision"`
+	SecretRef string `json:"secret_ref,omitempty"`
 }
 
 // KustomizationResult reports a registered kustomization.
@@ -578,22 +721,90 @@ type BootstrapResult struct {
 	Kustomizations []string `json:"kustomizations"`
 }
 
-// AddSource registers (create-or-update) an OCIRepository or GitRepository
-// source per spec.Type.
-func AddSource(ctx context.Context, e Engine, spec SourceSpec) (SourceResult, error) {
+// AddSource registers (create-or-update) an OCIRepository or GitRepository source
+// per spec.Type. When spec carries a Token it first mints the credential Secret
+// the source will reference — in that order, so the source never reconciles
+// against a secretRef that does not resolve yet; when it only references one, that
+// Secret is checked to exist first. s may be nil only for an anonymous source
+// (no credential to mint or check).
+func AddSource(ctx context.Context, e Engine, s SourceSecretStore, spec SourceSpec) (SourceResult, error) {
+	if err := spec.Validate(); err != nil {
+		return SourceResult{}, err
+	}
+	// Resolve the credential name once so the minted Secret and the source's
+	// secretRef cannot disagree.
+	spec.SecretRef = spec.SecretName()
+	switch {
+	case spec.Token != "":
+		if s == nil {
+			return SourceResult{}, errors.New("--token needs cluster access to mint the credential secret")
+		}
+		if err := mintSourceSecret(ctx, s, spec); err != nil {
+			return SourceResult{}, err
+		}
+	case spec.SecretRef != "":
+		if s == nil {
+			return SourceResult{}, errors.New("--secret-ref needs cluster access to check the credential secret")
+		}
+		if err := checkSourceSecret(ctx, s, spec); err != nil {
+			return SourceResult{}, err
+		}
+	}
 	switch spec.Type {
 	case SourceGit:
-		if err := e.CreateGitSource(ctx, spec.Name, spec.URL, spec.Revision); err != nil {
+		if err := e.CreateGitSource(ctx, spec); err != nil {
 			return SourceResult{}, err
 		}
 	default:
-		if err := e.CreateOCISource(ctx, spec.Name, spec.URL, spec.Revision, spec.Insecure); err != nil {
+		if err := e.CreateOCISource(ctx, spec); err != nil {
 			return SourceResult{}, err
 		}
 	}
 	return SourceResult{
-		Source: spec.Name, Kind: spec.Type.FluxKind(), URL: spec.URL, Revision: spec.Revision,
+		Source: spec.Name, Kind: spec.Type.FluxKind(), URL: spec.URL,
+		Revision: spec.Revision, SecretRef: spec.SecretRef,
 	}, nil
+}
+
+// mintSourceSecret writes the credential spec.SecretRef names, in the shape the
+// source kind requires: username/password keys for a GitRepository, a
+// dockerconfigjson pull secret for an OCIRepository.
+func mintSourceSecret(ctx context.Context, s SourceSecretStore, spec SourceSpec) error {
+	if spec.Type == SourceGit {
+		return s.ApplySecret(ctx, clusterVarsNamespace, spec.SecretRef, map[string][]byte{
+			"username": []byte(spec.BasicAuthUsername()),
+			"password": []byte(spec.Token),
+		}, nil)
+	}
+	registry, err := RegistryHost(spec.URL)
+	if err != nil {
+		return err
+	}
+	config, err := DockerConfigJSON(registry, spec.BasicAuthUsername(), spec.Token)
+	if err != nil {
+		return err
+	}
+	return s.ApplyDockerConfigSecret(ctx, clusterVarsNamespace, spec.SecretRef, config)
+}
+
+// checkSourceSecret fails fast when --secret-ref names a Secret that is not there.
+// The flux CLI does not validate the reference: it writes the source and then
+// blocks until the object is Ready, so a typo'd name otherwise costs the CLI's
+// full readiness timeout before surfacing as a source-controller error.
+func checkSourceSecret(ctx context.Context, s SourceSecretStore, spec SourceSpec) error {
+	exists, err := s.SecretExists(ctx, clusterVarsNamespace, spec.SecretRef)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	hint := "`flux create secret git " + spec.SecretRef + " --url " + spec.URL + "`"
+	if spec.Type != SourceGit {
+		hint = "`flux create secret oci " + spec.SecretRef + " --url <registry> -u <user> -p <token>`"
+	}
+	return fmt.Errorf("secret %q not found in namespace %q: create it first (%s), "+
+		"or pass --token to have dctl mint it", spec.SecretRef, clusterVarsNamespace, hint)
 }
 
 // RemoveSource deletes a source of the given type.
@@ -723,11 +934,16 @@ func VerifyKustomizationsWait(ctx context.Context, s KustomizationStatuser, name
 // filled from the registered source, so callers pass roots describing only the
 // paths and ordering. This one sequence serves every cluster: DOKS passes a
 // single `cluster` root, kind passes `local-requirements` then `cluster`.
-func Bootstrap(ctx context.Context, e Engine, a Applier, version string, src SourceSpec, vars map[string]string, roots []ReconcileRoot) (BootstrapResult, error) {
+func Bootstrap(ctx context.Context, e Engine, a BootstrapApplier, version string, src SourceSpec, vars map[string]string, roots []ReconcileRoot) (BootstrapResult, error) {
+	// Validate before Install: a bad source credential should fail the command
+	// without having installed controllers into the cluster first.
+	if err := src.Validate(); err != nil {
+		return BootstrapResult{}, err
+	}
 	if err := e.Install(ctx, version); err != nil {
 		return BootstrapResult{}, err
 	}
-	if _, err := AddSource(ctx, e, src); err != nil {
+	if _, err := AddSource(ctx, e, a, src); err != nil {
 		return BootstrapResult{}, err
 	}
 	kind := src.Type.FluxKind()

@@ -119,6 +119,24 @@ spec:
   `lb_hourly_price` cost constants.
 - PVCs must use `storageClassName: ${storage_class}` (→ `do-block-storage` on DOKS,
   `standard` on kind), never a hardcoded class.
+- **A private payload repo** — if your manifests live somewhere the cluster cannot read
+  anonymously, register your own source with a credential instead of making the repo
+  public:
+
+  ```sh
+  # HTTPS + a forge PAT: dctl mints the credential Secret (default <name>-auth)
+  dctl flux source create app --type git --url https://github.com/org/app \
+      --revision main --token "$GITHUB_TOKEN"        # or $DCTL_SOURCE_TOKEN
+  # ...or reference a Secret you created yourself (the only option for SSH keys):
+  flux create secret git app-deploy-key --url ssh://git@github.com/org/app
+  dctl flux source create app --type git --url ssh://git@github.com/org/app \
+      --revision main --secret-ref app-deploy-key
+  ```
+
+  The same flags work for `--type oci` against a private registry (dctl mints a
+  dockerconfigjson pull secret there). The auth flags are **declarative**: `source
+  create` rewrites the whole source, so a later call without them leaves it
+  unauthenticated — pass them on every invocation.
 
 ## Cluster lifecycle
 

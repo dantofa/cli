@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/url"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,6 +17,8 @@ type fakeEngine struct {
 	failOn        string // an event prefix that should return an error
 	failErr       error
 	lastConfigMap map[string]string // data of the last ApplyConfigMap call
+	lastSecret    map[string][]byte // data of the last secret applied
+	secrets       []string          // names of secrets already in flux-system
 	lastRoot      ReconcileRoot     // the last ApplyReconcileRoot argument
 }
 
@@ -30,8 +34,18 @@ func (f *fakeEngine) Install(_ context.Context, version string) error {
 	return f.record("install:" + version)
 }
 
-func (f *fakeEngine) CreateGitSource(_ context.Context, name, url, branch string) error {
-	return f.record("create-source:" + name + ":" + url + ":" + branch)
+func (f *fakeEngine) CreateGitSource(_ context.Context, spec SourceSpec) error {
+	return f.record("create-source:" + spec.Name + ":" + spec.URL + ":" + spec.Revision + secretSuffix(spec))
+}
+
+// secretSuffix renders a source's credential into the recorded event, so a test
+// sees both that the source was registered and what it authenticates with. An
+// anonymous source records nothing extra.
+func secretSuffix(spec SourceSpec) string {
+	if spec.SecretRef == "" {
+		return ""
+	}
+	return ":secret=" + spec.SecretRef
 }
 
 func (f *fakeEngine) DeleteGitSource(_ context.Context, name string) error {
@@ -42,8 +56,8 @@ func (f *fakeEngine) DeleteKustomization(_ context.Context, name string) error {
 	return f.record("delete-ks:" + name)
 }
 
-func (f *fakeEngine) CreateOCISource(_ context.Context, name, url, tag string, _ bool) error {
-	return f.record("create-oci-source:" + name + ":" + url + ":" + tag)
+func (f *fakeEngine) CreateOCISource(_ context.Context, spec SourceSpec) error {
+	return f.record("create-oci-source:" + spec.Name + ":" + spec.URL + ":" + spec.Revision + secretSuffix(spec))
 }
 
 func (f *fakeEngine) DeleteOCISource(_ context.Context, name string) error {
@@ -60,6 +74,23 @@ func (f *fakeEngine) ApplyConfigMap(_ context.Context, namespace, name string, d
 	return f.record("apply-cfgmap:" + namespace + "/" + name)
 }
 
+func (f *fakeEngine) SecretExists(_ context.Context, namespace, name string) (bool, error) {
+	if err := f.record("secret-exists:" + namespace + "/" + name); err != nil {
+		return false, err
+	}
+	return slices.Contains(f.secrets, name), nil
+}
+
+func (f *fakeEngine) ApplySecret(_ context.Context, namespace, name string, data map[string][]byte, _ map[string]string) error {
+	f.lastSecret = data
+	return f.record("apply-secret:" + namespace + "/" + name)
+}
+
+func (f *fakeEngine) ApplyDockerConfigSecret(_ context.Context, namespace, name string, config []byte) error {
+	f.lastSecret = map[string][]byte{".dockerconfigjson": config}
+	return f.record("apply-dockerconfig-secret:" + namespace + "/" + name)
+}
+
 func eq(t *testing.T, got, want string) {
 	t.Helper()
 	if got != want {
@@ -69,7 +100,7 @@ func eq(t *testing.T, got, want string) {
 
 func TestAddSource(t *testing.T) {
 	e := &fakeEngine{}
-	res, err := AddSource(context.Background(), e, SourceSpec{Type: SourceGit, Name: "app", URL: "https://git/app", Revision: "main"})
+	res, err := AddSource(context.Background(), e, e, SourceSpec{Type: SourceGit, Name: "app", URL: "https://git/app", Revision: "main"})
 	if err != nil {
 		t.Fatalf("AddSource: %v", err)
 	}
@@ -82,12 +113,260 @@ func TestAddSource(t *testing.T) {
 
 func TestAddSourceOCI(t *testing.T) {
 	e := &fakeEngine{}
-	res, err := AddSource(context.Background(), e, SourceSpec{Type: SourceOCI, Name: "app", URL: "oci://reg/app", Revision: "latest"})
+	res, err := AddSource(context.Background(), e, e, SourceSpec{Type: SourceOCI, Name: "app", URL: "oci://reg/app", Revision: "latest"})
 	if err != nil {
 		t.Fatalf("AddSource: %v", err)
 	}
 	eq(t, res.Kind, "OCIRepository")
 	eq(t, e.events[0], "create-oci-source:app:oci://reg/app:latest")
+}
+
+func TestAddSourceThreadsSecretRef(t *testing.T) {
+	e := &fakeEngine{secrets: []string{"app-deploy-key"}}
+	// A pre-existing credential (e.g. an SSH deploy key created out of band) is
+	// referenced, never re-created: it is checked, then used.
+	res, err := AddSource(context.Background(), e, e, SourceSpec{
+		Type: SourceGit, Name: "app", URL: "ssh://git@github.com/org/app",
+		Revision: "main", SecretRef: "app-deploy-key",
+	})
+	if err != nil {
+		t.Fatalf("AddSource: %v", err)
+	}
+	eq(t, res.SecretRef, "app-deploy-key")
+	want := []string{
+		"secret-exists:flux-system/app-deploy-key",
+		"create-source:app:ssh://git@github.com/org/app:main:secret=app-deploy-key",
+	}
+	if len(e.events) != len(want) {
+		t.Fatalf("events = %v, want %v", e.events, want)
+	}
+	for i := range want {
+		eq(t, e.events[i], want[i])
+	}
+}
+
+func TestAddSourceRejectsMissingSecretRef(t *testing.T) {
+	e := &fakeEngine{} // no secrets in the cluster
+	// The flux CLI writes the source and then blocks on readiness, so an
+	// unresolvable secretRef costs its full timeout before it surfaces. Reject it
+	// here instead, before anything is written.
+	_, err := AddSource(context.Background(), e, e, SourceSpec{
+		Type: SourceGit, Name: "app", URL: "https://github.com/org/app",
+		Revision: "main", SecretRef: "typoed-name",
+	})
+	if err == nil {
+		t.Fatal("expected an error for a secret-ref that does not resolve")
+	}
+	for _, want := range []string{"typoed-name", "flux-system", "--token"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got %v", want, err)
+		}
+	}
+	if len(e.events) != 1 || e.events[0] != "secret-exists:flux-system/typoed-name" {
+		t.Errorf("no source should have been registered, got %v", e.events)
+	}
+}
+
+func TestAddSourceMintSkipsTheExistenceCheck(t *testing.T) {
+	e := &fakeEngine{} // no secrets yet — the token creates one
+	if _, err := AddSource(context.Background(), e, e, SourceSpec{
+		Type: SourceGit, Name: "app", URL: "https://github.com/org/app",
+		Revision: "main", SecretRef: "app-creds", Token: "tok",
+	}); err != nil {
+		t.Fatalf("AddSource: %v", err)
+	}
+	// Minting is what makes the secret exist, so checking first would reject
+	// every first run.
+	for _, ev := range e.events {
+		if strings.HasPrefix(ev, "secret-exists:") {
+			t.Errorf("mint path must not pre-check the secret, got %v", e.events)
+		}
+	}
+}
+
+func TestAddSourceReferenceWithoutClusterAccessFails(t *testing.T) {
+	e := &fakeEngine{}
+	if _, err := AddSource(context.Background(), e, nil, SourceSpec{
+		Type: SourceGit, Name: "app", URL: "https://github.com/org/app", SecretRef: "creds",
+	}); err == nil {
+		t.Fatal("expected an error when a secret-ref is given with no store")
+	}
+	if len(e.events) != 0 {
+		t.Errorf("no source should have been registered, got %v", e.events)
+	}
+}
+
+func TestAddSourceMintsGitCredentialBeforeRegistering(t *testing.T) {
+	e := &fakeEngine{}
+	res, err := AddSource(context.Background(), e, e, SourceSpec{
+		Type: SourceGit, Name: "app", URL: "https://github.com/org/app",
+		Revision: "main", Token: "ghp_secret",
+	})
+	if err != nil {
+		t.Fatalf("AddSource: %v", err)
+	}
+	// The secret must exist before the source references it, or the first
+	// reconcile fails against an unresolvable secretRef.
+	want := []string{
+		"apply-secret:flux-system/app-auth",
+		"create-source:app:https://github.com/org/app:main:secret=app-auth",
+	}
+	if len(e.events) != len(want) {
+		t.Fatalf("events = %v, want %v", e.events, want)
+	}
+	for i := range want {
+		eq(t, e.events[i], want[i])
+	}
+	// Basic auth in the shape source-controller reads, with the conventional
+	// placeholder username a forge ignores for a PAT.
+	eq(t, string(e.lastSecret["username"]), "git")
+	eq(t, string(e.lastSecret["password"]), "ghp_secret")
+	eq(t, res.SecretRef, "app-auth")
+}
+
+func TestAddSourceMintUsesSecretRefNameAndUsername(t *testing.T) {
+	e := &fakeEngine{}
+	// --secret-ref names the secret to mint when a token is given, rather than
+	// selecting an existing one.
+	if _, err := AddSource(context.Background(), e, e, SourceSpec{
+		Type: SourceGit, Name: "app", URL: "https://gitlab.com/org/app", Revision: "main",
+		SecretRef: "forge-credential", Token: "tok", Username: "deploy-bot",
+	}); err != nil {
+		t.Fatalf("AddSource: %v", err)
+	}
+	eq(t, e.events[0], "apply-secret:flux-system/forge-credential")
+	eq(t, e.events[1], "create-source:app:https://gitlab.com/org/app:main:secret=forge-credential")
+	eq(t, string(e.lastSecret["username"]), "deploy-bot")
+}
+
+func TestAddSourceMintsOCIPullSecret(t *testing.T) {
+	e := &fakeEngine{}
+	if _, err := AddSource(context.Background(), e, e, SourceSpec{
+		Type: SourceOCI, Name: "app", URL: "oci://ghcr.io/org/app",
+		Revision: "latest", Token: "ghp_secret",
+	}); err != nil {
+		t.Fatalf("AddSource: %v", err)
+	}
+	// An OCIRepository's secretRef only resolves against a dockerconfigjson
+	// secret, so the OCI path must not mint the git-shaped basic-auth one.
+	eq(t, e.events[0], "apply-dockerconfig-secret:flux-system/app-auth")
+	eq(t, e.events[1], "create-oci-source:app:oci://ghcr.io/org/app:latest:secret=app-auth")
+	got := string(e.lastSecret[".dockerconfigjson"])
+	// Keyed by the registry host alone — a config keyed by the full artifact path
+	// is silently ignored on pull.
+	want := `{"auths":{"ghcr.io":{"username":"git","password":"ghp_secret","auth":"Z2l0OmdocF9zZWNyZXQ="}}}`
+	if got != want {
+		t.Errorf("dockerconfigjson =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestAddSourceRejectsTokenOnSSHURL(t *testing.T) {
+	// Basic auth cannot authenticate an SSH remote: failing here beats a source
+	// that reconciles for minutes against a credential git will never send.
+	for _, url := range []string{"ssh://git@github.com/org/app", "git@github.com:org/app.git"} {
+		e := &fakeEngine{}
+		_, err := AddSource(context.Background(), e, e, SourceSpec{
+			Type: SourceGit, Name: "app", URL: url, Revision: "main", Token: "tok",
+		})
+		if err == nil {
+			t.Fatalf("%s: expected an error for --token with an SSH URL", url)
+		}
+		if !strings.Contains(err.Error(), "--secret-ref") {
+			t.Errorf("%s: error should point at --secret-ref, got %v", url, err)
+		}
+		if len(e.events) != 0 {
+			t.Errorf("%s: nothing should have been written, got %v", url, e.events)
+		}
+	}
+}
+
+func TestAddSourceMintWithoutClusterAccessFails(t *testing.T) {
+	e := &fakeEngine{}
+	if _, err := AddSource(context.Background(), e, nil, SourceSpec{
+		Type: SourceGit, Name: "app", URL: "https://github.com/org/app", Token: "tok",
+	}); err == nil {
+		t.Fatal("expected an error when a token is given with no applier")
+	}
+	if len(e.events) != 0 {
+		t.Errorf("no source should have been registered, got %v", e.events)
+	}
+}
+
+func TestSourceSpecSecretName(t *testing.T) {
+	cases := []struct {
+		name string
+		spec SourceSpec
+		want string
+	}{
+		{"anonymous", SourceSpec{Name: "app"}, ""},
+		{"referenced", SourceSpec{Name: "app", SecretRef: "creds"}, "creds"},
+		{"minted", SourceSpec{Name: "app", Token: "tok"}, "app-auth"},
+		{"minted into a named secret", SourceSpec{Name: "app", SecretRef: "creds", Token: "tok"}, "creds"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { eq(t, tc.spec.SecretName(), tc.want) })
+	}
+}
+
+func TestRegistryHost(t *testing.T) {
+	cases := []struct{ url, want string }{
+		{"oci://ghcr.io/dantofa/platform", "ghcr.io"},
+		{"oci://kind-registry:5000/local", "kind-registry:5000"}, // port preserved
+		{"oci://ghcr.io", "ghcr.io"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.url, func(t *testing.T) {
+			got, err := RegistryHost(tc.url)
+			if err != nil {
+				t.Fatalf("RegistryHost(%q): %v", tc.url, err)
+			}
+			eq(t, got, tc.want)
+		})
+	}
+	if _, err := RegistryHost("oci://"); err == nil {
+		t.Error("expected an error for a URL with no host")
+	}
+}
+
+func TestBootstrapAuthenticatesPrivateSource(t *testing.T) {
+	e := &fakeEngine{}
+	// A cluster bootstrapped against a private platform fork: the credential is
+	// planted before Flux is pointed at the source.
+	if _, err := Bootstrap(context.Background(), e, e, "",
+		SourceSpec{
+			Type: SourceGit, Name: DefaultSourceName, URL: "https://github.com/org/private",
+			Revision: "master", Token: "tok",
+		},
+		nil, []ReconcileRoot{{Name: ClusterRootName, Path: DefaultSourcePath}}); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	want := []string{
+		"install:",
+		"apply-secret:flux-system/platform-auth",
+		"create-source:platform:https://github.com/org/private:master:secret=platform-auth",
+		"apply-cfgmap:flux-system/cluster-vars",
+		"apply-root:cluster:GitRepository/platform:" + DefaultSourcePath,
+	}
+	if len(e.events) != len(want) {
+		t.Fatalf("events = %v, want %v", e.events, want)
+	}
+	for i := range want {
+		eq(t, e.events[i], want[i])
+	}
+}
+
+func TestBootstrapRejectsBadSourceAuthBeforeInstalling(t *testing.T) {
+	e := &fakeEngine{}
+	// Nothing may reach the cluster — not even the controllers — when the source
+	// credential cannot work.
+	if _, err := Bootstrap(context.Background(), e, e, "",
+		SourceSpec{Type: SourceGit, Name: "platform", URL: "ssh://git@github.com/org/x", Token: "tok"},
+		nil, nil); err == nil {
+		t.Fatal("expected a validation error")
+	}
+	if len(e.events) != 0 {
+		t.Errorf("expected no cluster writes, got %v", e.events)
+	}
 }
 
 func TestAddKustomization(t *testing.T) {

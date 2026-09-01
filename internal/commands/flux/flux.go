@@ -6,6 +6,7 @@ package flux
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -52,12 +53,21 @@ func parseSourceType(v string) (fluxcore.SourceType, error) {
 }
 
 func newSourceCreateCmd(kubeconfig *string) *cobra.Command {
-	var url, sourceType, revision string
+	var url, sourceType, revision, secretRef, token, username string
 	var insecure bool
 	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create or update an OCIRepository or GitRepository source. Idempotent.",
-		Args:  cobra.ExactArgs(1),
+		Long: "Create or update a Flux source. A private repository or registry needs " +
+			"a credential: --secret-ref references one that already exists in " +
+			"flux-system, and --token mints it (HTTPS basic auth for git, an image " +
+			"pull secret for oci) as part of this command. An SSH deploy key must be " +
+			"created out of band (`flux create secret git`) and referenced with " +
+			"--secret-ref.\n\n" +
+			"The auth flags are declarative like every other flag here: this command " +
+			"rewrites the whole source, so a later call that omits them leaves the " +
+			"source unauthenticated. Pass them every time.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, err := parseSourceType(sourceType)
 			if err != nil {
@@ -66,8 +76,25 @@ func newSourceCreateCmd(kubeconfig *string) *cobra.Command {
 			if revision == "" {
 				revision = st.DefaultRevision()
 			}
-			res, err := fluxcore.AddSource(cmd.Context(), fluxclient.New(*kubeconfig),
-				fluxcore.SourceSpec{Type: st, Name: args[0], URL: url, Revision: revision, Insecure: insecure})
+			if token == "" {
+				token = os.Getenv("DCTL_SOURCE_TOKEN")
+			}
+			spec := fluxcore.SourceSpec{
+				Type: st, Name: args[0], URL: url, Revision: revision, Insecure: insecure,
+				SecretRef: secretRef, Token: token, Username: username,
+			}
+			// An authenticated source needs cluster access either way: to mint the
+			// credential, or to check the referenced one is there. An anonymous
+			// source stays a flux-CLI-only operation.
+			var secrets fluxcore.SourceSecretStore
+			if spec.SecretName() != "" {
+				kc, err := kube.NewFromPath(*kubeconfig)
+				if err != nil {
+					return render.Fail(err)
+				}
+				secrets = kc
+			}
+			res, err := fluxcore.AddSource(cmd.Context(), fluxclient.New(*kubeconfig), secrets, spec)
 			if err != nil {
 				return render.Fail(err)
 			}
@@ -80,6 +107,12 @@ func newSourceCreateCmd(kubeconfig *string) *cobra.Command {
 	f.StringVar(&sourceType, "type", string(fluxcore.DefaultSourceType), `Source type: "oci" or "git".`)
 	f.StringVar(&revision, "revision", "", `Revision to track: an OCI tag or git branch (default: "latest" for oci, "master" for git).`)
 	f.BoolVar(&insecure, "insecure", false, "Allow a plain-HTTP OCI registry (the in-cluster kind registry).")
+	f.StringVar(&secretRef, "secret-ref", "",
+		"Name of an existing Secret in flux-system to authenticate with (with --token, the name to mint instead; default \"<name>-auth\").")
+	f.StringVar(&token, "token", "",
+		"Access token to mint the source credential from, e.g. a forge PAT (default $DCTL_SOURCE_TOKEN).")
+	f.StringVar(&username, "username", "",
+		"Basic-auth username paired with --token (default \"git\", which forges ignore for a PAT).")
 	return cmd
 }
 

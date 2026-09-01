@@ -262,6 +262,7 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 	var (
 		bucket, region, fluxVersion           string
 		sourceType, sourceURL, sourceRevision string
+		sourceSecretRef, sourceToken          string
 		sourcePath, src, baseDomain           string
 		bwToken, bwProjectID, bwOrgID         string
 		namespace, secretName, configMapName  string
@@ -411,8 +412,14 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 			if grafanaCloud {
 				roots = append(roots, fluxcore.GrafanaCloudReconcileRoot())
 			}
+			if sourceToken == "" {
+				sourceToken = os.Getenv("DCTL_SOURCE_TOKEN")
+			}
 			res, err := fluxcore.Bootstrap(ctx, fluxclient.New(kubePath), kc, fluxVersion,
-				fluxcore.SourceSpec{Type: st, Name: src, URL: sourceURL, Revision: sourceRevision},
+				fluxcore.SourceSpec{
+					Type: st, Name: src, URL: sourceURL, Revision: sourceRevision,
+					SecretRef: sourceSecretRef, Token: sourceToken,
+				},
 				vars, roots)
 			if err != nil {
 				return render.Fail(err)
@@ -435,6 +442,10 @@ func newClusterBootstrapCmd(token *string) *cobra.Command {
 	f.StringVar(&sourceType, "source-type", string(fluxcore.DefaultSourceType), `GitOps source type: "oci" or "git".`)
 	f.StringVar(&sourceURL, "source-url", "", "URL of the GitOps source (default: the OCI/git URL for --source-type).")
 	f.StringVar(&sourceRevision, "source-revision", "", `Source revision to track (default: "latest" for oci, "master" for git).`)
+	f.StringVar(&sourceSecretRef, "source-secret-ref", "",
+		"Name of an existing Secret in flux-system the GitOps source authenticates with (with --source-token, the name to mint instead).")
+	f.StringVar(&sourceToken, "source-token", "",
+		"Access token to mint the GitOps source credential from, for a private source repo/registry (default $DCTL_SOURCE_TOKEN).")
 	f.StringVar(&sourcePath, "source-path", fluxcore.DefaultSourcePath, "Path within the source that Flux reconciles.")
 	f.StringVar(&src, "source-name", fluxcore.DefaultSourceName, "Name of the Flux source and reconcile root.")
 	f.StringVar(&baseDomain, "base-domain", "", "Cluster ingress FQDN (${base_domain} in cluster-vars). Required.")
