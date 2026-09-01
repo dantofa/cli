@@ -347,10 +347,16 @@ manifests to comply.
 
 ## Postgres
 
-The platform ships the **CloudNativePG operator** — the operator only. Do not install
-your own: CNPG's CRDs are cluster-scoped, so a second copy collides with everyone else's
-on a shared cluster. Declare your own `Cluster` CR in your own reconcile root, the same
-split as prometheus-operator (platform ships the CRDs, you ship the `ServiceMonitor`).
+The platform ships the **CloudNativePG operator** and its **barman-cloud plugin** — the
+operators only. Do not install either yourself: both register cluster-scoped CRDs, so a
+second copy collides with everyone else's on a shared cluster. Declare your own `Cluster`
+CR in your own reconcile root, the same split as prometheus-operator (platform ships the
+CRDs, you ship the `ServiceMonitor`).
+
+The barman-cloud plugin is what makes PITR possible at all — CNPG 1.26+ moved backup
+support out of the core operator, so an operator without it can run Postgres but cannot
+archive WAL. The platform ships no `ObjectStore`, so you still point your database at a
+bucket yourself.
 
 **Backup responsibility is split, and the split is enforced.** Velero backs up the
 cluster objects around your database — including your PVCs, so the shape comes back — but
