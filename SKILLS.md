@@ -25,7 +25,8 @@ your task to a section, follow the convention, reuse the primitive.
 - **Base stacks on every cluster**: cert-manager, External Secrets Operator (ESO),
   Velero (cluster backups), Kyverno (+ baseline governance policies), Trivy (image CVE
   scanning + gate), prometheus-operator CRDs, an always-on local Prometheus (metrics),
-  local Loki (logs), local Tempo (traces), Grafana Alloy collectors, and a cost-exporter.
+  local Loki (logs), local Tempo (traces), Grafana Alloy collectors, a cost-exporter, and
+  the CloudNativePG operator (see "Postgres").
 - **Ingress**: Cloudflare Tunnel (DOKS default) or Traefik + external-dns behind a DO
   LoadBalancer (`--dolb`); a local-only Traefik on kind, published on the host's real
   `:80`/`:443`.
@@ -343,6 +344,26 @@ drop all capabilities, seccomp `RuntimeDefault`, no host namespaces/paths), **cp
 memory requests and a memory limit** on every container, and **no `:latest`** image tag
 (use a tag or digest). Non-compliant Pods are rejected at admission — design images and
 manifests to comply.
+
+## Postgres
+
+The platform ships the **CloudNativePG operator** — the operator only. Do not install
+your own: CNPG's CRDs are cluster-scoped, so a second copy collides with everyone else's
+on a shared cluster. Declare your own `Cluster` CR in your own reconcile root, the same
+split as prometheus-operator (platform ships the CRDs, you ship the `ServiceMonitor`).
+
+**Backup responsibility is split, and the split is enforced.** Velero backs up the
+cluster objects around your database — including your PVCs, so the shape comes back — but
+**not** the contents of the Postgres data volumes. Copying a live data directory yields a
+crash-inconsistent artifact that looks like a backup and is not one, so the
+`cnpg-exclude-volumes-from-fs-backup` Kyverno policy annotates every CNPG instance pod to
+opt those volumes out of Velero's file-system backup automatically. You do not need to
+set it, and forgetting it cannot silently cost you a bad restore.
+
+What that leaves you: **database recovery is yours**. If you need PITR, configure CNPG's
+own WAL archiving and base backups against object storage you own — the platform's
+`backup-credential` is scoped to the Velero namespace and is not yours to use. Without
+that, a destroyed cluster means a lost database, however green the Velero backups look.
 
 ## Secrets
 

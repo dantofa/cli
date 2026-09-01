@@ -5,3 +5,4 @@ resources:
   - pod-security.yaml
   - require-resources.yaml
   - disallow-latest-tag.yaml
+  - cnpg-fs-backup-exclude.yaml
